@@ -11,23 +11,13 @@ from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 from PIL import Image
 
-# ==========================================
-# PHIÊN BẢN: TAB2 LINH HOẠT THEO Ý NGƯỜI DÙNG (17/07/2026)
-# - Tab1 giữ nguyên toàn bộ
-# - Tab2: Cho phép tự do thêm/xóa/sửa file Đối Chiếu
-# - Dòng nào bị xóa trong Đối Chiếu → xóa dòng trong SaoKe
-# - Cập nhật y chang từng ô user đã thay đổi
-# Cài đặt: pip install pandas openpyxl pillow unidecode
-# Chạy: python app.py
-# ==========================================
-
 COL_TEN_CTY = 'TENDTPN'
 COL_MA = 'MADTPN'
 COL_DIENGIAI = 'DIENGIAI'
 
 ALIAS_WORDS = {r'\bbetong\b': 'be tong'}
 ACTION_VERBS = ['chuyen tien', 'chuyen khoan', 'ck', 'thanh toan', 'tt', 'tra tien', 'ct']
-BASE_STOP_WORDS = [r'\bchuyen khoan\b', r'\bck\b', r'\bthanh toan\b', r'\btt\b', r'\brut sec\b', r'\bsec\b', r'\brut tien\b', r'\bnop tien\b', r'\bvao tk\b', r'\bphi dv\b', r'\bphi quan ly\b', r'\bsms banking\b', r'\bhoa don\b', r'\bhd\b', r'\bdot\b', r'\bcuoi\b', r'\btam ung\b', r'\bquyet toan\b', r'\bhdtc\b', r'\bhdkt\b', r'\bbe tong\b', r'\bbetong\b', r'\bly tam\b', r'\bthep\b', r'\bauto\b', r'\bcong ty\b', r'\bcty\b', r'\bctcp\b', r'\bco phan\b', r'\bcp\b', r'\btrach nhiem huu han\b', r'\btnhh\b', r'\bmtv\b', r'\bm t v\b', r'\bmot thanh vien\b', r'\bchi nhanh\b', r'\btap doan\b', r'\blien hop\b', r'\bco so\b', r'\bdoanh nghiep\b', r'\bviet nam\b', r'\bvn\b', r'\bva\b', r'\bgroup\b', r'\bholdings\b', r'\bthuong mai\b', r'\btm\b', r'\bdich vu\b', r'\bdv\b', r'\btmdv\b', r'\btmcp\b', r'\bsan xuat\b', r'\bsx\b', r'\bxuat nhap khau\b', r'\bxnk\b', r'\bdau tu\b', r'\bxay dung\b', r'\bxd\b', r'\bcong nghiep\b', r'\bcn\b', r'\bco khi\b', r'\bkim loai\b', r'\bngu kim\b', r'\bvat lieu\b', r'\bdanh bong\b', r'\bkhuon mau\b', r'\bgia cong\b', r'\bkho bai\b', r'\bbao ve\b', r'\bkhoa hoc\b', r'\bcong nghe\b', r'\bmoi truong\b', r'\bmachinery\b', r'\bmetal\b', r'\bnhom hop kim\b', r'\bnhom\b', r'\bhop kim\b', r'\bthiet bi dien\b', r'\bdien\b', r'\bthiet bi\b', r'\bphat trien\b', r'\bky thuat\b', r'\btong hop\b', r'\bquoc te\b', r'\bche tao\b', r'\bvan tai\b', r'\bvat tu\b', r'\bphu lieu\b', r'\bnhua\b', r'\bbao bi\b', r'\btrang tri\b']
+BASE_STOP_WORDS = [r'\bchuyen khoan\b', r'\bck\b', r'\bthanh toan\b', r'\btt\b', r'\brut sec\b', r'\bsec\b', r'\brut tien\b', r'\bnop tien\b', r'\bvao tk\b', r'\bphi dv\b', r'\bphi quan ly\b', r'\bsms banking\b', r'\bhoa don\b', r'\bhd\b', r'\bdot\b', r'\bcuoi\b', r'\btam ung\b', r'\bquyet toan\b', r'\bhdtc\b', r'\bhdkt\b', r'\bbe tong\b', r'\bbetong\b', r'\bly tam\b', r'\bthep\b', r'\bauto\b', r'\bcong ty\b', r'\bcty\b', r'\bctcp\b', r'\bco phan\b', r'\bcp\b', r'\btrach nhiem huu han\b', r'\btnhh\b', r'\bmtv\b', r'\bm t v\b', r'\bmot thanh vien\b', r'\bchi nhanh\b', r'\btap doan\b', r'\blien hop\b', r'\bco so\b', r'\bdoanh nghiep\b', r'\bviet nam\b', r'\bvn\b', r'\bva\b', r'\bgroup\b', r'\bholdings\b', r'\bthuong mai\b', r'\btm\b', r'\bdich vu\b', r'\bdv\b', r'\btmdv\b', r'\btmcp\b', r'\bsan xuat\b', r'\bsx\b', r'\bxuat nhap khau\b', r'\bxnk\b', r'\bdau tu\b', r'\bxay dung\b', r'\bxd\b', r'\bcong nghiep\b', r'\bcn\b', r'\bco khi\b', r'\bkim loai\b', r'\bngu kim\b', r'\bvat lieu\b', r'\bdanh bong\b', r'\bkhuon mau\b', r'\bgia gia cong\b', r'\bkho bai\b', r'\bbao ve\b', r'\bkhoa hoc\b', r'\bcong nghe\b', r'\bmoi truong\b', r'\bmachinery\b', r'\bmetal\b', r'\bnhom hop kim\b', r'\bnhom\b', r'\bhop kim\b', r'\bthiet bi dien\b', r'\bdien\b', r'\bthiet bi\b', r'\bphat trien\b', r'\bky thuat\b', r'\btong hop\b', r'\bquoc te\b', r'\bche tao\b', r'\bvan tai\b', r'\bvat tu\b', r'\bphu lieu\b', r'\bnhua\b', r'\bbao bi\b', r'\btrang tri\b']
 
 def apply_alias(text):
     for pattern, replacement in ALIAS_WORDS.items():
@@ -142,7 +132,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             hd_index_banra[hd].append(item)
     hd_pattern_comp = re.compile(r'\b(?:hoa don|hd)\s*(?:so\s*)?((?:\d+(?:\s*(?:,|\+|va\b|-)\s*)*)+)')
     if enabled_ps is None:
-        enabled_ps = {"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"}
+        enabled_ps = {"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9"}
     else:
         enabled_ps = set([p.upper() for p in enabled_ps])
     if custom_order:
@@ -154,6 +144,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     h_d_bank = {str(c).strip().upper(): c for c in df_bank.columns}
     col_tkno_name = h_d_bank.get('TKNO', None)
     col_tkco_name = h_d_bank.get('TKCO', None)
+    col_tenkh_name_in_df = h_d_bank.get('TENKH', None)
     for idx, row in df_bank.iterrows():
         if progress_callback and idx % 20 == 0: progress_callback(15 + (idx / total_rows) * 65, f"Đối soát dòng {idx+1}...")
         thu_tu_dong = idx + 2
@@ -184,6 +175,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         quet_hd = ""
         quet_hopdong = ""
         quet_sotien = ""
+        
         def try_p1():
             nonlocal quet_ten
             if "P1" not in enabled_ps: return
@@ -323,6 +315,26 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 if len(matched_companies) == 1:
                     quet_sotien = f"{amt_val:,.0f}"
                     matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
+        
+        # P9: Lọc qua TENKH có sẵn trên sao kê đối chiếu trực tiếp với file Mua vào / Bán ra
+        def try_p9():
+            nonlocal quet_ten
+            if "P9" not in enabled_ps: return
+            tenkh_goc = str(row.get(col_tenkh_name_in_df, '')) if col_tenkh_name_in_df else ""
+            if not tenkh_goc or str(tenkh_goc).strip().lower() in ["", "nan"]: return
+            
+            tenkh_goc_norm = unidecode.unidecode(tenkh_goc).lower().strip()
+            if not current_target_list: return
+            
+            for item in current_target_list:
+                item_tenkh = str(item.get(COL_TEN_CTY, '')).strip()
+                item_tenkh_norm = unidecode.unidecode(item_tenkh).lower().strip()
+                
+                if tenkh_goc_norm == item_tenkh_norm and tenkh_goc_norm != "":
+                    quet_ten = tenkh_goc
+                    matches_for_row.append((9, 100, item, f"P9 - TRÙNG TÊN KH GỐC"))
+                    return
+
         if order_list:
             for p in order_list:
                 if p == "P1": try_p1()
@@ -331,6 +343,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 elif p == "P4": try_p4()
                 elif p == "P5": try_p5()
                 elif p in ("P6", "P7", "P8"): try_p6_p7_p8()
+                elif p == "P9": try_p9()
                 if matches_for_row: break
         else:
             if priority == "smart_first":
@@ -341,6 +354,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     try_p3()
                     try_p4()
                     try_p5()
+                    if not matches_for_row: try_p9()
             else:
                 try_p1()
                 try_p2()
@@ -349,17 +363,20 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 try_p5()
                 if not matches_for_row:
                     try_p6_p7_p8()
+                    if not matches_for_row: try_p9()
+
         if matches_for_row:
             matches_for_row.sort(key=lambda x: (x[0], -x[1]))
             best_match = matches_for_row[0]
             p_level = best_match[0]
-            ten_quet = quet_ten if p_level <= 5 else ""
+            ten_quet = quet_ten if p_level in (1, 2, 3, 4, 5, 9) else ""
             hd_quet = quet_hd if p_level == 6 else ""
             hopdong_quet = quet_hopdong if p_level == 7 else ""
             sotien_quet = quet_sotien if p_level == 8 else ""
             all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": diengiai_goc, "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": ten_quet, "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": hd_quet, "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": hopdong_quet, "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": sotien_quet, "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_TEN_CTY, ""), "MÃ ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_MA, ""), "CÁCH MATCH": f"P{p_level}", "SCORE_NUM": 100})
         else:
             all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": diengiai_goc, "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
+    
     wb_doichieu = Workbook()
     ws = wb_doichieu.active
     ws.title = "Ket Qua Match"
@@ -367,7 +384,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     ws.append(headers)
     for m in all_matches: ws.append([m.get(h, "") for h in headers])
     format_excel_sheet(ws, is_doichieu=True)
-    ws_legend = wb_doichieu.create_sheet("Giai Thich P1-P8")
+    ws_legend = wb_doichieu.create_sheet("Giai Thich P1-P9")
     legend_data = [
         ["CÁCH MATCH", "Ý NGHĨA", "MÔ TẢ CHI TIẾT"],
         ["P1", "Khớp tên nguyên vẹn", "Tìm chính xác tên công ty theo từ khóa (word boundary) trong diễn giải"],
@@ -378,6 +395,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         ["P6", "Hóa đơn (Mua/Bán)", "Tìm số HÓA ĐƠN trong diễn giải → đối chiếu với file Mua VÀO hoặc BÁN RA"],
         ["P7", "Hợp đồng / MATHANG", "Tìm số HỢP ĐỒNG hoặc tên hàng trong diễn giải → đối chiếu với file Mua VÀO hoặc BÁN RA"],
         ["P8", "Số tiền duy nhất", "Khớp duy nhất theo số tiền khi dòng ≥ 5 triệu và có file Mua/Bán"],
+        ["P9", "Khớp Tên KH Gốc", "Dùng TENKH sẵn có trên file sao kê gốc để đối chiếu chéo (không dấu) với file Mua/Bán"],
     ]
     thin = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
     for r_idx, row_data in enumerate(legend_data, 1):
@@ -389,13 +407,8 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     ws_legend.column_dimensions['A'].width = 14
     ws_legend.column_dimensions['B'].width = 25
     ws_legend.column_dimensions['C'].width = 80
-    ws_legend.cell(row=11, column=1, value="GHI CHÚ:")
-    ws_legend.cell(row=12, column=1, value="- P6, P7, P8 chỉ kích hoạt khi số tiền dòng ≥ 5.000.000 và có file Mua VÀO / BÁN RA")
-    ws_legend.cell(row=13, column=1, value="- Nếu dòng có TKCO bắt đầu 112 → chỉ dùng file Mua VÀO")
-    ws_legend.cell(row=14, column=1, value="- Nếu dòng có TKNO bắt đầu 112 → chỉ dùng file BÁN RA")
-    ws_legend.cell(row=15, column=1, value="- Nếu không rõ Mua hay Bán → dùng cả hai file (hành vi cũ)")
-    for r in range(12, 16): ws_legend.cell(row=r, column=1).font = Font(italic=True)
     wb_doichieu.save(path_save_doichieu)
+    
     wb_saoke = load_workbook(file_saoke)
     ws = wb_saoke.active
     h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
@@ -406,94 +419,36 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     col_tenkh = h_d.get('TENKH', 11)
     col_ghichu = h_d.get('GHICHU')
     def is_valid_cell(val): return pd.notna(val) and str(val).strip() != "" and str(val).lower().strip() != "nan"
-    no_fill = PatternFill(fill_type=None)
+    
     yellow_fill = PatternFill(start_color="FFFFFF00", fill_type="solid")
     for r in range(2, ws.max_row + 1):
         matched = [m for m in all_matches if m["THỨ TỰ DÒNG GỐC"] == r and m["SCORE_NUM"] == 100]
         if matched:
             m = matched[0]
+            
+            ma_dtpn = str(m.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN", "")).strip()
+            if ma_dtpn.lower() == "nan": ma_dtpn = ""
+            
             tkco_val = str(ws.cell(row=r, column=col_tkco).value).strip() if is_valid_cell(ws.cell(row=r, column=col_tkco).value) else ""
             tkno_val = str(ws.cell(row=r, column=col_tkno).value).strip() if is_valid_cell(ws.cell(row=r, column=col_tkno).value) else ""
-            if tkco_val == "1121" or (tkco_val != "" and tkno_val == ""): ws.cell(row=r, column=col_madtpnno).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
-            elif tkno_val == "1121" or (tkno_val != "" and tkco_val == ""): ws.cell(row=r, column=col_madtpnco).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
-            else: ws.cell(row=r, column=col_madtpnno).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
+            
+            if tkco_val == "1121" or (tkco_val != "" and tkno_val == ""): ws.cell(row=r, column=col_madtpnno).value = ma_dtpn
+            elif tkno_val == "1121" or (tkno_val != "" and tkco_val == ""): ws.cell(row=r, column=col_madtpnco).value = ma_dtpn
+            else: ws.cell(row=r, column=col_madtpnno).value = ma_dtpn
+            
             ws.cell(row=r, column=col_tenkh).value = m["TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN"]
             if col_ghichu: ws.cell(row=r, column=col_ghichu).value = m["CÁCH MATCH"]
+            
+            # Nếu tên có nhưng MÃ rỗng (nan) -> Tô vàng
+            if ma_dtpn == "":
+                for c in range(1, ws.max_column + 1): ws.cell(row=r, column=c).fill = yellow_fill
         else:
             for c in range(1, ws.max_column + 1): ws.cell(row=r, column=c).fill = yellow_fill
+            
     if progress_callback: progress_callback(98, "Đang lưu file...")
     wb_saoke.save(path_save_saokemoi)
     if progress_callback: progress_callback(100, "Hoàn tất thành công!")
 
-def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callback=None):
-    if progress_callback: progress_callback(5, "Đang đọc file đối chiếu đã chỉnh sửa tay...")
-    try:
-        df_dc = pd.read_excel(file_dc_edited)
-    except Exception as e:
-        raise Exception(f"Không đọc được file đối chiếu: {e}")
-    update_map = {}
-    for _, row in df_dc.iterrows():
-        thu_tu = row.get("THỨ TỰ DÒNG GỐC")
-        if pd.isna(thu_tu): continue
-        try:
-            key = int(float(thu_tu))
-        except:
-            continue
-        update_map[key] = {
-            "MA": str(row.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN", "")).strip() if pd.notna(row.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN")) else "",
-            "TEN": str(row.get("TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN", "")).strip() if pd.notna(row.get("TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN")) else "",
-            "DIENGIAI": str(row.get("DIỄN GIẢI GỐC", "")).strip() if pd.notna(row.get("DIỄN GIẢI GỐC")) else None,
-            "GHICHU": str(row.get("CÁCH MATCH", "")).strip() if pd.notna(row.get("CÁCH MATCH")) else ""
-        }
-    if progress_callback: progress_callback(20, f"Tìm thấy {len(update_map)} dòng còn trong file đối chiếu...")
-    try:
-        wb = load_workbook(file_sk_old)
-        ws = wb.active
-    except Exception as e:
-        raise Exception(f"Không mở được file Sao kê: {e}")
-    h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
-    col_tkno = h_d.get('TKNO', 5)
-    col_tkco = h_d.get('TKCO', 7)
-    col_madtpnno = h_d.get('MADTPNNO', 6)
-    col_madtpnco = h_d.get('MADTPNCO', 8)
-    col_tenkh = h_d.get('TENKH', 11)
-    col_ghichu = h_d.get('GHICHU', None)
-    col_diengiai = h_d.get('DIENGIAI', None)
-    rows_to_delete = []
-    for r in range(2, ws.max_row + 1):
-        if r not in update_map:
-            rows_to_delete.append(r)
-    for r in sorted(rows_to_delete, reverse=True):
-        ws.delete_rows(r)
-    if progress_callback: progress_callback(40, f"Đã xóa {len(rows_to_delete)} dòng không còn trong file đối chiếu...")
-    updated_count = 0
-    for r in range(2, ws.max_row + 1):
-        if r in update_map:
-            data = update_map[r]
-            if data["MA"]:
-                tkco_val = str(ws.cell(row=r, column=col_tkco).value or "").strip().upper()
-                tkno_val = str(ws.cell(row=r, column=col_tkno).value or "").strip().upper()
-                if tkco_val == "1121" or (tkco_val and not tkno_val):
-                    ws.cell(row=r, column=col_madtpnno).value = data["MA"]
-                elif tkno_val == "1121" or (tkno_val and not tkco_val):
-                    ws.cell(row=r, column=col_madtpnco).value = data["MA"]
-                else:
-                    ws.cell(row=r, column=col_madtpnno).value = data["MA"]
-            else:
-                ws.cell(row=r, column=col_madtpnno).value = ""
-                ws.cell(row=r, column=col_madtpnco).value = ""
-            if data["TEN"]:
-                ws.cell(row=r, column=col_tenkh).value = data["TEN"]
-            else:
-                ws.cell(row=r, column=col_tenkh).value = ""
-            if col_ghichu:
-                ws.cell(row=r, column=col_ghichu).value = data["GHICHU"]
-            if col_diengiai and data.get("DIENGIAI") is not None:
-                ws.cell(row=r, column=col_diengiai).value = data["DIENGIAI"]
-            updated_count += 1
-    if progress_callback: progress_callback(90, f"Đã cập nhật {updated_count} dòng...")
-    wb.save(path_save)
-    if progress_callback: progress_callback(100, "Cập nhật thành công theo file đối chiếu đã sửa!")
 class AppGomNghiepVu:
     def __init__(self, root):
         self.root = root
@@ -501,15 +456,16 @@ class AppGomNghiepVu:
         self.root.geometry("780x670")
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        
         self.tab1 = ttk.Frame(self.notebook)
         self.tab2 = ttk.Frame(self.notebook)
-        self.tab3 = ttk.Frame(self.notebook)
+        
         self.notebook.add(self.tab1, text="  1. Đối Soát Ngân Hàng (Excel)  ")
-        self.notebook.add(self.tab2, text="  2. Chỉnh Sửa Tay - Cập Nhật Mã & Tên từ File Đối Chiếu  ")
-        self.notebook.add(self.tab3, text="  3. Gom Ảnh Hàng Loạt Thành PDF Chứng Từ  ")
+        self.notebook.add(self.tab2, text="  2. Gom Ảnh Hàng Loạt Thành PDF Chứng Từ  ")
+        
         self.setup_tab1_interface()
         self.setup_tab2_interface()
-        self.setup_tab3_interface()
+
     def setup_tab1_interface(self):
         self.file_saoke_path = self.file_master_path = self.file_muavao_path = self.file_banra_path = None
         tk.Label(self.tab1, text="PHẦN MỀM ĐỐI CHIẾU MÃ PHÁP NHÂN TRÊN EXCEL", font=("Arial", 14, "bold"), fg="#4F81BD").pack(pady=10)
@@ -527,18 +483,20 @@ class AppGomNghiepVu:
         tk.Button(f_files, text="4. Chọn File BÁN RA Năm", command=lambda: self.chon_file("banra"), width=25).grid(row=3, column=0, pady=3, padx=5)
         self.lbl_banra = tk.Label(f_files, text="Chưa chọn file (Không bắt buộc)...", fg="gray")
         self.lbl_banra.grid(row=3, column=1, sticky="w")
-        f_match = tk.LabelFrame(self.tab1, text=" TÙy chọn kiểu match (P1-P8) - Tick để kích hoạt ", padx=10, pady=5)
+        
+        f_match = tk.LabelFrame(self.tab1, text=" Tùy chọn kiểu match (P1-P9) - Tick để kích hoạt ", padx=10, pady=5)
         f_match.pack(fill="x", padx=20, pady=5)
         self.p_vars = {}
         p_labels = {
-            "P1": "P1 - Khớp tên nguyên vẹn (word boundary)",
-            "P2": "P2 - Khớp ngược (tên nằm trong diễn giải)",
+            "P1": "P1 - Khớp tên nguyên vẹn",
+            "P2": "P2 - Khớp ngược",
             "P3": "P3 - Khớp viết tắt (acronym)",
             "P4": "P4 - Khớp cụm từ (chunk)",
-            "P5": "P5 - Fuzzy AI (bigram similarity ≥ 85%)",
-            "P6": "P6 - Hóa đơn gộp (intersection unique MA)",
+            "P5": "P5 - Fuzzy AI",
+            "P6": "P6 - Hóa đơn gộp",
             "P7": "P7 - Hợp đồng / MATHANG",
-            "P8": "P8 - Số tiền duy nhất (khoảng < 1đ)"
+            "P8": "P8 - Số tiền duy nhất",
+            "P9": "P9 - Dùng TENKH gốc trên sao kê (Không dấu)"
         }
         for i, (p, label) in enumerate(p_labels.items()):
             row = i // 2
@@ -548,20 +506,20 @@ class AppGomNghiepVu:
             cb = ttk.Checkbutton(f_match, text=label, variable=var)
             cb.grid(row=row, column=col, sticky="w", padx=5, pady=2)
         f_order = tk.Frame(f_match)
-        f_order.grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
-        tk.Label(f_order, text="Thứ tự tùy chỉnh (có thể để trống):", font=("Arial", 9)).pack(side="left")
+        f_order.grid(row=5, column=0, columnspan=2, sticky="w", pady=5)
+        tk.Label(f_order, text="Thứ tự tùy chỉnh (trống):", font=("Arial", 9)).pack(side="left")
         self.custom_order_entry = tk.Entry(f_order, width=35, font=("Arial", 9))
         self.custom_order_entry.pack(side="left", padx=5)
-        tk.Label(f_order, text="(ví dụ: P6,P7,P8,P1,P5)", font=("Arial", 8), fg="gray").pack(side="left")
+        
         f_priority = tk.Frame(self.tab1)
         f_priority.pack(fill="x", padx=20, pady=5)
-        tk.Label(f_priority, text="Nếu không nhập thứ tự tùy chỉnh, dùng:", font=("Arial", 9, "bold")).pack(anchor="w")
         self.priority_var = tk.StringVar(value="name_first")
-        ttk.Radiobutton(f_priority, text="✓ Ưu tiên P1-P5 (Tên) trước", variable=self.priority_var, value="name_first").pack(anchor="w")
-        ttk.Radiobutton(f_priority, text="✓ Ưu tiên P6-P8 (HÓA ĐƠN/HỢP ĐỒNG/TIỀN) trước", variable=self.priority_var, value="smart_first").pack(anchor="w")
+        ttk.Radiobutton(f_priority, text="✓ Ưu tiên P1-P5 trước", variable=self.priority_var, value="name_first").pack(anchor="w")
+        ttk.Radiobutton(f_priority, text="✓ Ưu tiên P6-P8 trước", variable=self.priority_var, value="smart_first").pack(anchor="w")
+        
         f_stop = tk.Frame(self.tab1)
         f_stop.pack(fill="x", padx=20, pady=5)
-        tk.Label(f_stop, text="Nhập Tên Chủ TK cần loại trừ khỏi diễn giải:", font=("Arial", 10, "bold")).pack(anchor="w")
+        tk.Label(f_stop, text="Nhập Tên Chủ TK cần loại trừ:", font=("Arial", 10, "bold")).pack(anchor="w")
         self.entry_stop_words = tk.Entry(f_stop, width=70, font=("Arial", 11))
         self.entry_stop_words.pack(anchor="w", ipady=3)
         self.btn_run_t1 = tk.Button(self.tab1, text="BẨT ĐẦU ĐỐI SOÁT EXCEL", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), command=self.t1_chay, height=2)
@@ -571,6 +529,7 @@ class AppGomNghiepVu:
         self.progressbar_t1.pack(fill="x", padx=25, pady=5)
         self.lbl_status_t1 = tk.Label(self.tab1, text="Sẵn sàng...", font=("Arial", 9, "italic"))
         self.lbl_status_t1.pack()
+
     def t1_chay(self):
         if not self.file_saoke_path or not self.file_master_path: return messagebox.showerror("Lỗi", "Vui lòng chọn đủ File Sao kê và File data MADTPN!")
         p_dc = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile="KetQua_DoiChieu.xlsx")
@@ -592,58 +551,29 @@ class AppGomNghiepVu:
             finally:
                 self.root.after(0, lambda: self.btn_run_t1.config(state="normal"))
         threading.Thread(target=task, daemon=True).start()
+
     def setup_tab2_interface(self):
-        self.file_sk_cu = self.file_dc_sua = None
-        tk.Label(self.tab2, text="CậP NHẬT FILE SAO KÊ TỪ FILE CHỈNH SửA TAY (Từ KetQua_DoiChieu đã sửa) - Tự do thêm/xóa/sửa", font=("Arial", 11, "bold"), fg="#FF8C00").pack(pady=15)
-        f_files = tk.Frame(self.tab2)
-        f_files.pack(fill="x", padx=20, pady=10)
-        tk.Button(f_files, text="1. File Sao Kê gốc (Cần cập nhật)", command=lambda: self.chon_file("sk3"), width=28).grid(row=0, column=0, pady=5, padx=5)
-        self.lbl_sk_cu = tk.Label(f_files, text="Chưa chọn...", fg="gray")
-        self.lbl_sk_cu.grid(row=0, column=1, sticky="w")
-        tk.Button(f_files, text="2. File Đối Chiếu đã Sửa Tay", command=lambda: self.chon_file("dc3"), width=28).grid(row=1, column=0, pady=5, padx=5)
-        self.lbl_dc_sua = tk.Label(f_files, text="Chưa chọn...", fg="gray")
-        self.lbl_dc_sua.grid(row=1, column=1, sticky="w")
-        self.btn_run_t2 = tk.Button(self.tab2, text="TIẾN HÀNH CậP NH᫐T THEO FILE ĐỐI CHIẾU ĐÃ SửA", bg="#FF8C00", fg="white", font=("Arial", 11, "bold"), command=self.t2_chay, height=2)
-        self.btn_run_t2.pack(fill="x", padx=25, pady=15)
-        self.progress_var_t2 = tk.DoubleVar()
-        self.progressbar_t2 = ttk.Progressbar(self.tab2, variable=self.progress_var_t2, maximum=100)
-        self.progressbar_t2.pack(fill="x", padx=25, pady=5)
-        self.lbl_status_t2 = tk.Label(self.tab2, text="Sẵn sàng...", font=("Arial", 9, "italic"))
-        self.lbl_status_t2.pack()
-    def t2_chay(self):
-        if not self.file_sk_cu or not self.file_dc_sua: return messagebox.showerror("Lỗi", "Chọn đủ 2 file!")
-        p_save = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile="SaoKe_Final_SuaTay.xlsx")
-        if not p_save: return
-        self.btn_run_t2.config(state="disabled")
-        self.progress_var_t2.set(0)
-        def task():
-            try:
-                process_update_saoke(self.file_sk_cu, self.file_dc_sua, p_save, self.t2_update_progress)
-                self.root.after(0, lambda: messagebox.showinfo("Thành công", "Đã cập nhật theo đúng file đối chiếu đã sửa!\nFile đã lưu: " + p_save))
-            except Exception as e:
-                self.root.after(0, lambda e=e: messagebox.showerror("Lỗi", str(e)))
-            finally:
-                self.root.after(0, lambda: self.btn_run_t2.config(state="normal"))
-        threading.Thread(target=task, daemon=True).start()
-    def setup_tab3_interface(self):
         self.selected_images = []
-        tk.Label(self.tab3, text="ỨNG DỤNG GOM HÌNH ẢNH THÀNH PDF CHứNG TỪ", font=("Arial", 13, "bold"), fg="#2E7D32").pack(pady=15)
-        f_btns = tk.Frame(self.tab3)
+        tk.Label(self.tab2, text="ỨNG DỤNG GOM HÌNH ẢNH THÀNH PDF CHỨNG TỪ", font=("Arial", 13, "bold"), fg="#2E7D32").pack(pady=15)
+        f_btns = tk.Frame(self.tab2)
         f_btns.pack()
-        tk.Button(f_btns, text="+ Chọn Thêm Ảnh (Chọn theo thứ tự trang muốn)", command=self.t3_chon_anh, width=32).grid(row=0, column=0, padx=5)
-        tk.Button(f_btns, text="🗑 Xóa Toàn Bộ Danh Sách", command=self.t3_xoa_anh, width=25).grid(row=0, column=1, padx=5)
-        self.txt_img_list = tk.Text(self.tab3, height=10, width=65, state="disabled", bg="#F5F5F5")
+        tk.Button(f_btns, text="+ Chọn Thêm Ảnh", command=self.t3_chon_anh, width=32).grid(row=0, column=0, padx=5)
+        tk.Button(f_btns, text="🗑 Xóa Toàn Bộ", command=self.t3_xoa_anh, width=25).grid(row=0, column=1, padx=5)
+        self.txt_img_list = tk.Text(self.tab2, height=10, width=65, state="disabled", bg="#F5F5F5")
         self.txt_img_list.pack(pady=10)
-        self.lbl_so_anh = tk.Label(self.tab3, text="Chưa chọn ảnh. Sau khi chọn, thứ tự trong list = thứ tự trang PDF.", fg="gray", font=("Arial", 9))
+        self.lbl_so_anh = tk.Label(self.tab2, text="Chưa chọn ảnh.", fg="gray", font=("Arial", 9))
         self.lbl_so_anh.pack()
-        self.btn_run_t3 = tk.Button(self.tab3, text="XUẤT RA PDF CHứNG TỪ", bg="#2E7D32", fg="white", font=("Arial", 11, "bold"), command=self.t3_chay, state="disabled", height=2)
+        self.btn_run_t3 = tk.Button(self.tab2, text="XUẤT RA PDF CHỨNG TỪ", bg="#2E7D32", fg="white", font=("Arial", 11, "bold"), command=self.t3_chay, state="disabled", height=2)
         self.btn_run_t3.pack(fill="x", padx=25, pady=10)
+
     def t3_chon_anh(self):
         files = filedialog.askopenfilenames(filetypes=[("Image files", "*.png *.jpg *.jpeg")])
         if files: self.selected_images.extend(files); self.t3_cap_nhat_ui()
+
     def t3_xoa_anh(self):
         self.selected_images = []
         self.t3_cap_nhat_ui()
+
     def t3_cap_nhat_ui(self):
         self.txt_img_list.config(state="normal")
         self.txt_img_list.delete("1.0", tk.END)
@@ -651,7 +581,8 @@ class AppGomNghiepVu:
             self.txt_img_list.insert(tk.END, f"{i+1}. {os.path.basename(f_path)}\n")
         self.txt_img_list.config(state="disabled")
         self.btn_run_t3.config(state="normal" if self.selected_images else "disabled")
-        self.lbl_so_anh.config(text=f"Đã chọn {len(self.selected_images)} ảnh | Thứ tự list = thứ tự trang trong PDF")
+        self.lbl_so_anh.config(text=f"Đã chọn {len(self.selected_images)} ảnh")
+
     def t3_chay(self):
         p_pdf = filedialog.asksaveasfilename(defaultextension=".pdf", initialfile="TaiLieu_ChungTu_ETAX.pdf")
         if p_pdf:
@@ -662,20 +593,17 @@ class AppGomNghiepVu:
                 if imgs:
                     if len(imgs) == 1: imgs[0].save(p_pdf, "PDF", resolution=100.0)
                     else: imgs[0].save(p_pdf, save_all=True, append_images=imgs[1:], resolution=100.0)
-                    messagebox.showinfo("Thành công", f"Đã tạo file PDF chứng từ thành công!\n\n{p_pdf}\nTổng số trang: {len(imgs)}")
+                    messagebox.showinfo("Thành công", f"Đã tạo PDF thành công!\n\n{p_pdf}")
                     self.t3_xoa_anh()
-                else:
-                    messagebox.showwarning("Thông báo", "Danh sách ảnh trống.")
             except Exception as e:
-                messagebox.showerror("Lỗi tạo PDF", f"{str(e)}\n\nKhuyến nghị: pip install Pillow")
+                messagebox.showerror("Lỗi", str(e))
             finally:
-                self.btn_run_t3.config(state="normal", text="XUẤT RA PDF CHứNG TỪ")
+                self.btn_run_t3.config(state="normal", text="XUẤT RA PDF CHỨNG TỪ")
+
     def t1_update_progress(self, percent, text):
         self.root.after(0, lambda: self.progress_var_t1.set(percent))
         self.root.after(0, lambda: self.lbl_status_t1.config(text=text))
-    def t2_update_progress(self, percent, text):
-        self.root.after(0, lambda: self.progress_var_t2.set(percent))
-        self.root.after(0, lambda: self.lbl_status_t2.config(text=text))
+
     def chon_file(self, loai):
         path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls *.csv")])
         if path:
@@ -683,8 +611,7 @@ class AppGomNghiepVu:
             elif loai == "mst": self.file_master_path = path; self.lbl_master.config(text=os.path.basename(path), fg="blue")
             elif loai == "muavao": self.file_muavao_path = path; self.lbl_muavao.config(text=os.path.basename(path), fg="green")
             elif loai == "banra": self.file_banra_path = path; self.lbl_banra.config(text=os.path.basename(path), fg="green")
-            elif loai == "sk3": self.file_sk_cu = path; self.lbl_sk_cu.config(text=os.path.basename(path), fg="blue")
-            elif loai == "dc3": self.file_dc_sua = path; self.lbl_dc_sua.config(text=os.path.basename(path), fg="blue")
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = AppGomNghiepVu(root)
