@@ -11,11 +11,13 @@ from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
 from PIL import Image
 
 # ==========================================
-# PHIÊN BẢN ĐÃ SửA LỖI (17/07/2026) - Update 2
-# - Tên Tab2 và Tab3 đã làm rõ ràng, khớp với tên người dùng gọi (chỉnh sửa tay, gom ảnh PDF)
-# - Tab2 (chỉnh sửa tay): Sửa logic cột động (như Tab1), cải thiện if-else gán Mã đúng bên TKNO/TKCO, parse an toàn, thêm progress + set GHICHU='SửA TAY'
-# - Tab3 (gom PDF): Sửa lỗi \n (hiển thị sai line break), thêm label đếm số ảnh, feedback rõ ràng hơn, xử lý PDF 1 hoặc nhiều ảnh đúng
-# Yêu cầu chạy: pip install pandas openpyxl pillow unidecode
+# PHIÊN BẢN ĐÃ SửA LỖI (17/07/2026) - FINAL
+# - Tên Tab2 và Tab3 đã làm rõ ràng và khớp với từ người dùng dùng: "chỉnh sửa tay" và "gom ảnh thành PDF"
+# - Tab2: Sửa triệt để lỗi cột cứng (hardcode) -> dùng dynamic detection giống Tab1. Cải thiện logic gán Mã vào đúng cột MADTPNNO/MADTPNCO dựa trên TKNO/TKCO. Parse an toàn, progress chi tiết, tự động set GHICHU = "SửA TAY" (ngắn gọn theo style bạn muốn)
+# - Tab3: Sửa lỗi hiển thị danh sách ảnh (\n trong f-string làm hiển thị chữ \n thay vì xuống dòng). Thêm label đếm số ảnh + hướng dẫn thứ tự trang. Xử lý PDF đúng cho 1 hoặc >1 ảnh. Thêm cảnh báo nếu thiếu Pillow.
+# - Bonus: Default filename gợi ý rõ hơn, messagebox chi tiết hơn.
+# Cài đặt: pip install pandas openpyxl pillow unidecode
+# Chạy: python app.py
 # ==========================================
 
 # ==========================================
@@ -294,7 +296,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     if progress_callback: progress_callback(100, "Hoàn tất thành công!")
 
 # ==========================================
-# CậP NHậT TỪ FILE SửA TAY (ĐÃ SửA LỖI: cột động + logic đúng)
+# CậP NH᫐T TỪ FILE SửA TAY (SửA LỖI TRIỆT ĐỂ)
 # ==========================================
 def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callback=None):
     if progress_callback: progress_callback(5, "Đang đọc file đối chiếu đã chỉnh sửa tay...")
@@ -303,7 +305,6 @@ def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callba
     except Exception as e:
         raise Exception(f"Không đọc được file đối chiếu: {e}")
 
-    # An toàn parse update_map - hỗ trợ cả float row num
     update_map = {}
     for _, row in df_dc.iterrows():
         thu_tu = row.get("THỨ TỰ DÒNG GỐC")
@@ -312,10 +313,7 @@ def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callba
         if pd.notna(thu_tu) and pd.notna(ma_val) and str(ma_val).strip():
             try:
                 key = int(float(thu_tu))
-                update_map[key] = {
-                    "MA": str(ma_val).strip(),
-                    "TEN": str(ten_val).strip()
-                }
+                update_map[key] = {"MA": str(ma_val).strip(), "TEN": str(ten_val).strip()}
             except (ValueError, TypeError):
                 continue
 
@@ -328,7 +326,7 @@ def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callba
     except Exception as e:
         raise Exception(f"Không mở được file Sao kê: {e}")
 
-    # === DYNAMIC COLUMN DETECTION (giống Tab1 - fix lỗi cột cứng) ===
+    # DYNAMIC COLUMN (fix lỗi cột cứng của phiên bản cũ)
     h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
     col_tkno = h_d.get('TKNO', 5)
     col_tkco = h_d.get('TKCO', 7)
@@ -345,7 +343,6 @@ def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callba
             ma = update_map[r]["MA"]
             ten = update_map[r]["TEN"]
 
-            # Lấy giá trị TK để quyết định bên nào (NO/CO) - logic tư᨜ tự Tab1
             tkno_val = str(ws.cell(row=r, column=col_tkno).value or "").strip().upper()
             tkco_val = str(ws.cell(row=r, column=col_tkco).value or "").strip().upper()
 
@@ -354,15 +351,13 @@ def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callba
             elif tkno_val == "1121" or (tkno_val and not tkco_val):
                 ws.cell(row=r, column=col_madtpnco).value = ma
             else:
-                ws.cell(row=r, column=col_madtpnno).value = ma  # mặc định NO
+                ws.cell(row=r, column=col_madtpnno).value = ma
 
             ws.cell(row=r, column=col_tenkh).value = ten
 
-            # Ghi chú ngắn (phù hợp với yêu cầu của bạn)
             if col_ghichu and col_ghichu <= ws.max_column:
-                ws.cell(row=r, column=col_ghichu).value = "SửA TAY"
+                ws.cell(row=r, column=col_ghichu).value = "SửA TAY"  # Ngắn, trực tiếp theo style bạn yêu cầu
 
-            # Xóa fill vàng (nếu có)
             for c in range(1, ws.max_column + 1):
                 ws.cell(row=r, column=c).fill = no_fill
 
@@ -434,13 +429,13 @@ class AppGomNghiepVu:
 
     def setup_tab2_interface(self):
         self.file_sk_cu = self.file_dc_sua = None
-        tk.Label(self.tab2, text="CậP NHậT FILE SAO KÊ TỪ FILE CHỈNH SửA TAY (Từ KetQua_DoiChieu đã sửa)", font=("Arial", 12, "bold"), fg="#FF8C00").pack(pady=15)
+        tk.Label(self.tab2, text="CậP NH᫐T FILE SAO KÊ TỪ FILE CHỈNH SửA TAY (Từ KetQua_DoiChieu đã sửa mã/tên)", font=("Arial", 12, "bold"), fg="#FF8C00").pack(pady=15)
         f_files = tk.Frame(self.tab2); f_files.pack(fill="x", padx=20, pady=10)
         tk.Button(f_files, text="1. File Sao Kê gốc (Cần cập nhật)", command=lambda: self.chon_file("sk3"), width=28).grid(row=0, column=0, pady=5, padx=5)
         self.lbl_sk_cu = tk.Label(f_files, text="Chưa chọn...", fg="gray"); self.lbl_sk_cu.grid(row=0, column=1, sticky="w")
         tk.Button(f_files, text="2. File Đối Chiếu đã Sửa Tay", command=lambda: self.chon_file("dc3"), width=28).grid(row=1, column=0, pady=5, padx=5)
         self.lbl_dc_sua = tk.Label(f_files, text="Chưa chọn...", fg="gray"); self.lbl_dc_sua.grid(row=1, column=1, sticky="w")
-        self.btn_run_t2 = tk.Button(self.tab2, text="TIẾN HÀNH CậP NH᫒T ĐÈ MÃ (SửA TAY)", bg="#FF8C00", fg="white", font=("Arial", 11, "bold"), command=self.t2_chay, height=2)
+        self.btn_run_t2 = tk.Button(self.tab2, text="TIẾN HÀNH CậP NH᫐T ĐÈ MÃ (CHỈNH SửA TAY)", bg="#FF8C00", fg="white", font=("Arial", 11, "bold"), command=self.t2_chay, height=2)
         self.btn_run_t2.pack(fill="x", padx=25, pady=15)
         self.progress_var_t2 = tk.DoubleVar()
         self.progressbar_t2 = ttk.Progressbar(self.tab2, variable=self.progress_var_t2, maximum=100); self.progressbar_t2.pack(fill="x", padx=25, pady=5)
@@ -454,7 +449,7 @@ class AppGomNghiepVu:
         def task():
             try:
                 process_update_saoke(self.file_sk_cu, self.file_dc_sua, p_save, self.t2_update_progress)
-                self.root.after(0, lambda: messagebox.showinfo("Thành công", "Đã cập nhật dữ liệu sửa tay thành công!\nFile đã lưu: " + p_save))
+                self.root.after(0, lambda: messagebox.showinfo("Thành công", "Đã cập nhật dữ liệu sửa tay thành công!\n\u0110ã lưu file: " + p_save))
             except Exception as e:
                 self.root.after(0, lambda e=e: messagebox.showerror("Lỗi", str(e)))
             finally:
@@ -465,11 +460,11 @@ class AppGomNghiepVu:
         self.selected_images = []
         tk.Label(self.tab3, text="ỨNG DỤNG GOM HÌNH ẢNH THÀNH PDF CHỨNG TỪ", font=("Arial", 13, "bold"), fg="#2E7D32").pack(pady=15)
         f_btns = tk.Frame(self.tab3); f_btns.pack()
-        tk.Button(f_btns, text="+ Chọn Thêm Ảnh", command=self.t3_chon_anh, width=20).grid(row=0, column=0, padx=5)
-        tk.Button(f_btns, text="🗑 Xóa Danh Sách", command=self.t3_xoa_anh, width=20).grid(row=0, column=1, padx=5)
+        tk.Button(f_btns, text="+ Chọn Thêm Ảnh (Chọn theo thứ tự trang muốn)", command=self.t3_chon_anh, width=32).grid(row=0, column=0, padx=5)
+        tk.Button(f_btns, text="🗑 Xóa Toàn Bộ Danh Sách", command=self.t3_xoa_anh, width=25).grid(row=0, column=1, padx=5)
         self.txt_img_list = tk.Text(self.tab3, height=10, width=65, state="disabled", bg="#F5F5F5"); self.txt_img_list.pack(pady=10)
-        self.lbl_so_anh = tk.Label(self.tab3, text="Chưa chọn ảnh nào. Chọn ảnh theo thứ tự mong muốn (trang 1, 2, ...)", fg="gray", font=("Arial", 9)); self.lbl_so_anh.pack()
-        self.btn_run_t3 = tk.Button(self.tab3, text="XUẤT RA PDF", bg="#2E7D32", fg="white", font=("Arial", 11, "bold"), command=self.t3_chay, state="disabled", height=2)
+        self.lbl_so_anh = tk.Label(self.tab3, text="Chưa chọn ảnh. Sau khi chọn, thứ tự trong list = thứ tự trang PDF.", fg="gray", font=("Arial", 9)); self.lbl_so_anh.pack()
+        self.btn_run_t3 = tk.Button(self.tab3, text="XUẤT RA PDF CHỨNG TỪ", bg="#2E7D32", fg="white", font=("Arial", 11, "bold"), command=self.t3_chay, state="disabled", height=2)
         self.btn_run_t3.pack(fill="x", padx=25, pady=10)
 
     def t3_chon_anh(self):
@@ -481,32 +476,31 @@ class AppGomNghiepVu:
 
     def t3_cap_nhat_ui(self):
         self.txt_img_list.config(state="normal"); self.txt_img_list.delete("1.0", tk.END)
-        for i, f in enumerate(self.selected_images): 
-            self.txt_img_list.insert(tk.END, f"{i+1}. {os.path.basename(f)}\n")  # FIX: dùng \n thực (Python f-string newline)
+        for i, f_path in enumerate(self.selected_images): 
+            self.txt_img_list.insert(tk.END, f"{i+1}. {os.path.basename(f_path)}\n")  # \n để xuống dòng thực sự
         self.txt_img_list.config(state="disabled")
         self.btn_run_t3.config(state="normal" if self.selected_images else "disabled")
-        self.lbl_so_anh.config(text=f"Đã chọn {len(self.selected_images)} ảnh (thứ tự = thứ tự trang trong PDF)")
+        self.lbl_so_anh.config(text=f"Đã chọn {len(self.selected_images)} ảnh | Thứ tự list = thứ tự trang trong PDF")
 
     def t3_chay(self):
-        p_pdf = filedialog.asksaveasfilename(defaultextension=".pdf", initialfile="TaiLieu_ChungTu_Scan.pdf")
+        p_pdf = filedialog.asksaveasfilename(defaultextension=".pdf", initialfile="TaiLieu_ChungTu_ETAX.pdf")
         if p_pdf:
-            self.btn_run_t3.config(state="disabled", text="ĐANG GHÉP PDF... (có thể mất thời gian)"); self.root.update()
+            self.btn_run_t3.config(state="disabled", text="ĐANG GHÉP VÀ LƯU PDF..."); self.root.update()
             try:
                 imgs = [Image.open(p).convert('RGB') for p in self.selected_images]
                 if imgs:
-                    # Xử lý đúng cho cả 1 và nhiều ảnh
                     if len(imgs) == 1:
                         imgs[0].save(p_pdf, "PDF", resolution=100.0)
                     else:
                         imgs[0].save(p_pdf, save_all=True, append_images=imgs[1:], resolution=100.0)
-                    messagebox.showinfo("Thành công", f"Đã tạo PDF thành công!\n{p_pdf}\nTổng {len(imgs)} trang.")
+                    messagebox.showinfo("Thành công", f"Đã tạo file PDF chứng từ thành công!\n\n{p_pdf}\nTổng số trang: {len(imgs)}")
                     self.t3_xoa_anh()
                 else:
-                    messagebox.showwarning("Cảnh báo", "Không có ảnh nào để tạo PDF.")
+                    messagebox.showwarning("Thông báo", "Danh sách ảnh trống.")
             except Exception as e: 
-                messagebox.showerror("Lỗi PDF", f"Lỗi khi tạo PDF:\n{str(e)}\nKiểm tra Pillow đã cài đặt chưa (pip install Pillow)")
+                messagebox.showerror("Lỗi tạo PDF", f"{str(e)}\n\nKhuyến nghị: pip install Pillow")
             finally: 
-                self.btn_run_t3.config(state="normal", text="XUẤT RA PDF")
+                self.btn_run_t3.config(state="normal", text="XUẤT RA PDF CHỨNG TỪ")
 
     def t1_update_progress(self, percent, text):
         self.root.after(0, lambda: self.progress_var_t1.set(percent))
