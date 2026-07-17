@@ -11,12 +11,11 @@ from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
 from PIL import Image
 
 # ==========================================
-# PHIÊN BẢN CÓ CHỌN ƯU TIÊN THU᫐T TOÁN (17/07/2026)
-# - Thêm tùy chọn "Thứ tự Ưu tiên đối soát" trong Tab1:
-#   + Mặc định: Ưu tiên P1-P5 (khớp tên) trước (giữ nguyên hành vi cũ)
-#   + Mới: Ưu tiên P6-P8 (khớp HÓA ĐƠN / HỢP ĐỒNG / TIỀN) trước, rồi mới P1-P5
-# - Tất cả P1-P8 giữ nguyên 100%, chỉ thay đổi thứ tự thử match
-# - Tối Ưu tốc đã có sẵn (precompute regex, HD index...)
+# PHIÊN BẢN TÙY CHỌN KIỂU MATCH NÂNG CAO (17/07/2026)
+# - Thêm Checkbox cho từng P1 đến P8 (có thể tick 1, 2 hoặc nhiều kiểu)
+# - Thêm ô nhập "Thứ tự Ưu tiên tùy chỉnh" (ví dụ: P6,P7,P8,P1,P5). Để trống = dùng radio Ưu tiên bên dưới
+# - Nếu không chọn gì = chạy đầy đủ P1-P8 theo thứ tự cũ
+# - Tất cả logic P1-P8 giữ nguyên 100%
 # Cài đặt: pip install pandas openpyxl pillow unidecode
 # Chạy: python app.py
 # ==========================================
@@ -91,9 +90,9 @@ def load_smart_ktsc(file_path):
         print(f"Lỗi đọc file: {e}"); return []
 
 # ==========================================
-# LÕI ĐỐI SOÁT SIÊU VIỆT P1 - P8 (CÓ CHỌN ƯU TIÊN)
+# LÕI ĐỐI SOÁT SIÊU VIỆT P1 - P8 (TÙY CHỌN KIỂU + THỨ TỰ)
 # ==========================================
-def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_saokemoi, user_stop_str, file_muavao=None, file_banra=None, progress_callback=None, priority="name_first"):
+def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_saokemoi, user_stop_str, file_muavao=None, file_banra=None, progress_callback=None, priority="name_first", enabled_ps=None, custom_order=None):
     dynamic_stops = BASE_STOP_WORDS.copy()
     user_stops = [w.strip() for w in user_stop_str.split(',') if w.strip()]
     for w in user_stops:
@@ -131,6 +130,20 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
 
     hd_pattern_comp = re.compile(r'\b(?:hoa don|hd)\s*(?:so\s*)?((?:\d+(?:\s*(?:,|\+|va\b|-)\s*)*)+)')
 
+    # Xử lý enabled_ps và custom_order
+    if enabled_ps is None:
+        enabled_ps = {"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"}
+    else:
+        enabled_ps = set([p.upper() for p in enabled_ps])
+
+    if custom_order:
+        try:
+            order_list = [p.strip().upper() for p in str(custom_order).split(',') if p.strip()]
+        except:
+            order_list = None
+    else:
+        order_list = None
+
     all_matches = []
     total_rows = len(df_bank)
 
@@ -145,44 +158,60 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         diengiai_norm = normalize_basic(diengiai_goc)
         diengiai_cleaned = get_core_name(diengiai_goc, dynamic_stops)
         diengiai_nospace = diengiai_norm.replace(" ", "") 
-
-        # Tính amt_val sớm (cần cho cả hai chế độ Ưu tiên)
         amt_val = parse_amt_to_float(row.get('TTVND', 0))
         if amt_val == 0: amt_val = parse_amt_to_float(row.get('TTVND_TT', 0))
 
         matches_for_row = []
 
-        # ==========================================
-        # HÀM CON: Thử P1-P5 (khớp tên master)
-        # ==========================================
-        def try_p1_to_p5():
-            nonlocal matches_for_row
+        # Hàm con cho từng P (chỉ chạy nếu enabled)
+        def try_p1():
+            if "P1" not in enabled_ps: return
             for master_item in master_list:
-                core = master_item['norm_core']; core_words = core.split()
+                core = master_item['norm_core']
                 if len(core) < 3: continue
                 p1_re = master_item.get('p1_regex')
                 if p1_re and p1_re.search(diengiai_norm):
                     matches_for_row.append((1, len(core), master_item, core.upper()))
-                    continue
+                    return  # chỉ 1 match per master
+
+        def try_p2():
+            if "P2" not in enabled_ps: return
+            for master_item in master_list:
+                core = master_item['norm_core']
                 if len(diengiai_cleaned) >= 4 and re.search(r'\b' + r'\s+'.join(map(re.escape, diengiai_cleaned.split())) + r'\b', core):
                     matches_for_row.append((2, -len(core), master_item, diengiai_cleaned.upper()))
-                    continue
+                    return
+
+        def try_p3():
+            if "P3" not in enabled_ps: return
+            for master_item in master_list:
+                core = master_item['norm_core']
+                core_words = core.split()
                 if len(core_words) >= 4:
                     acronym = "".join(w[0] for w in core_words)
                     if len(acronym) >= 4 and re.search(r'\b(?:' + '|'.join(ACTION_VERBS) + r')\b.*?\b' + re.escape(acronym) + r'\b', diengiai_norm):
                         matches_for_row.append((3, len(acronym), master_item, acronym.upper()))
-                        continue
+                        return
+
+        def try_p4():
+            if "P4" not in enabled_ps: return
+            for master_item in master_list:
+                core = master_item['norm_core']
+                core_words = core.split()
                 p4_match = False
                 for i in range(len(core_words)):
                     for j in range(i+1, len(core_words)+1):
                         chunk = "".join(core_words[i:j])
                         if ((j - i >= 2 and len(chunk) >= 5) or len(chunk) >= 8) and chunk in diengiai_nospace:
                             matches_for_row.append((4, len(chunk), master_item, chunk.upper()))
-                            p4_match = True; break
+                            p4_match = True
+                            break
                     if p4_match: break
-                if p4_match: continue
+                if p4_match: return
 
-            if not matches_for_row and len(diengiai_cleaned) >= 5:
+        def try_p5():
+            if "P5" not in enabled_ps: return
+            if len(diengiai_cleaned) >= 5:
                 best_sim = 0.0
                 best_master = None
                 bg1 = get_bigrams(diengiai_cleaned)
@@ -200,11 +229,9 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 if best_sim >= 0.85 and best_master is not None:
                     matches_for_row.append((5, int(best_sim*100), best_master, f"TÊN AI: {best_master['norm_core'].upper()}"))
 
-        # ==========================================
-        # HÀM CON: Thử P6-P8 (khớp HÓA ĐƠN / HỢP ĐỒNG / TIỀN)
-        # ==========================================
         def try_p6_p7_p8():
-            nonlocal matches_for_row
+            if not ("P6" in enabled_ps or "P7" in enabled_ps or "P8" in enabled_ps):
+                return
             if not target_list or amt_val < 5000000:
                 return
             text_ext = unidecode.unidecode(str(diengiai_goc)).lower()
@@ -212,38 +239,39 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             text_ext = re.sub(r'\s+', ' ', text_ext).strip()
 
             # P6
-            raw_hd_groups = hd_pattern_comp.findall(text_ext)
-            for hd_group in raw_hd_groups:
-                nums = re.findall(r'\d+', hd_group)
-                if not nums: continue
-                candidate_sets = []
-                best_item_map = {}
-                for num in set(nums):
-                    num_clean = num.lstrip('0') or '0'
-                    if num_clean == '0': continue
-                    cands = hd_index.get(num_clean, [])
-                    if cands:
-                        mas_set = set()
-                        for item in cands:
-                            ma = item.get(COL_MA)
-                            if ma:
-                                mas_set.add(ma)
-                                if ma not in best_item_map:
-                                    best_item_map[ma] = item
-                        if mas_set:
-                            candidate_sets.append(mas_set)
-                if candidate_sets:
-                    try:
-                        common_candidates = set.intersection(*candidate_sets)
-                        if len(common_candidates) == 1:
-                            matched_ma = list(common_candidates)[0]
-                            matches_for_row.append((6, len(nums), best_item_map[matched_ma], f"SỐ HĐ: {', '.join(nums)}"))
-                            return  # đã match P6 thì dừng
-                    except Exception:
-                        pass
+            if "P6" in enabled_ps:
+                raw_hd_groups = hd_pattern_comp.findall(text_ext)
+                for hd_group in raw_hd_groups:
+                    nums = re.findall(r'\d+', hd_group)
+                    if not nums: continue
+                    candidate_sets = []
+                    best_item_map = {}
+                    for num in set(nums):
+                        num_clean = num.lstrip('0') or '0'
+                        if num_clean == '0': continue
+                        cands = hd_index.get(num_clean, [])
+                        if cands:
+                            mas_set = set()
+                            for item in cands:
+                                ma = item.get(COL_MA)
+                                if ma:
+                                    mas_set.add(ma)
+                                    if ma not in best_item_map:
+                                        best_item_map[ma] = item
+                            if mas_set:
+                                candidate_sets.append(mas_set)
+                    if candidate_sets:
+                        try:
+                            common = set.intersection(*candidate_sets)
+                            if len(common) == 1:
+                                matched_ma = list(common)[0]
+                                matches_for_row.append((6, len(nums), best_item_map[matched_ma], f"SỐ HĐ: {', '.join(nums)}"))
+                                return
+                        except:
+                            pass
 
             # P7
-            if not matches_for_row:
+            if "P7" in enabled_ps and not matches_for_row:
                 contracts_found = []
                 explicit_contracts = re.findall(r'\bhop dong\s*(?:so\s*)?([a-z0-9/\-]+)\b', text_ext)
                 contracts_found.extend([c for c in explicit_contracts if len(c) >= 4])
@@ -251,8 +279,8 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 contracts_found.extend([c for c in explicit_contracts_spaced if '/' in c or '-' in c])
                 hd_matches = re.findall(r'\bhd\s*(?:so\s*)?([a-z0-9/\-]+)\b', text_ext)
                 for val in hd_matches:
-                    if '/' in val or '-' in val:
-                        if len(val) >= 4: contracts_found.append(val)
+                    if '/' in val or '-' in val and len(val) >= 4:
+                        contracts_found.append(val)
                 for contract in set(contracts_found):
                     c_clean = re.sub(r'[^A-Z0-9]', '', contract.upper())
                     parts = re.split(r'[/_.-]', contract.upper())
@@ -269,7 +297,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     if matches_for_row: break
 
             # P8
-            if not matches_for_row:
+            if "P8" in enabled_ps and not matches_for_row:
                 matched_companies = set()
                 best_item = None
                 for item in target_list:
@@ -279,38 +307,52 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 if len(matched_companies) == 1:
                     matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
 
-        # ==========================================
-        # CHỌN THỨ TỰ ƯU TIÊN
-        # ==========================================
-        if priority == "smart_first":
-            # Ưu tiên P6-P8 trước
-            try_p6_p7_p8()
-            if not matches_for_row:
-                try_p1_to_p5()
+        # Xây dựng thứ tự chạy
+        if order_list:
+            # Dùng thứ tự tùy chỉnh
+            for p in order_list:
+                if p == "P1": try_p1()
+                elif p == "P2": try_p2()
+                elif p == "P3": try_p3()
+                elif p == "P4": try_p4()
+                elif p == "P5": try_p5()
+                elif p in ("P6", "P7", "P8"): try_p6_p7_p8()
+                if matches_for_row: break
         else:
-            # Mặc định: Ưu tiên P1-P5 trước (hành vi cũ)
-            try_p1_to_p5()
-            if not matches_for_row:
+            # Dùng radio priority + enabled
+            if priority == "smart_first":
                 try_p6_p7_p8()
+                if not matches_for_row:
+                    try_p1()
+                    try_p2()
+                    try_p3()
+                    try_p4()
+                    try_p5()
+            else:
+                try_p1()
+                try_p2()
+                try_p3()
+                try_p4()
+                try_p5()
+                if not matches_for_row:
+                    try_p6_p7_p8()
 
-        # GHI NH᫒N KẾT QUẢ
+        # Ghi kết quả
         if matches_for_row:
             matches_for_row.sort(key=lambda x: (x[0], -x[1]))
             best_match = matches_for_row[0]
             p_level = best_match[0]
             match_value = str(best_match[3])
-
             ten_quet = match_value if p_level <= 5 else ""
             hd_quet = match_value.replace("SỐ HĐ: ", "") if p_level == 6 else ""
             hopdong_quet = match_value.replace("HỢP ĐỒNG: ", "") if p_level == 7 else ""
             sotien_quet = match_value.replace("SỐ TIỀN: ", "") if p_level == 8 else ""
-
-            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": diengiai_goc, "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": ten_quet, "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": hd_quet, "HỢP ĐỒNG QUÉT ĐƯỢC TRONG DIỄN GIẢI": hopdong_quet, "SỐ TIỀN QUÉT ĐƯỢC TRONG DIỄN GIẢI": sotien_quet, "TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_TEN_CTY, ""), "MÃ ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_MA, ""), "CÁCH MATCH": f"P{p_level}", "SCORE_NUM": 100})
+            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": diengiai_goc, "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": ten_quet, "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": hd_quet, "HỢP ĐỒNG QUÉT ĐƯỢC TRONG DIỄN GIẢI": hopdong_quet, "SỐ TIỀN QUÉT ĐƯỢC TRONG DIỄN GIẢI": sotien_quet, "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_TEN_CTY, ""), "MÃ ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_MA, ""), "CÁCH MATCH": f"P{p_level}", "SCORE_NUM": 100})
         else:
             all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": diengiai_goc, "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
 
     wb_doichieu = Workbook(); ws = wb_doichieu.active; ws.title = "Ket Qua Match"
-    headers = ["THỨ TỰ DÒNG GỐC", "DIỄN GIẢI GỐC", "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI", "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI", "HỢP ĐỒNG QUÉT ĐƯỢC TRONG DIỄN GIẢI", "SỐ TIỀN QUÉT ĐƯỢC TRONG DIỄN GIẢI", "TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN", "MÃ ĐỐI TƯỢNG PHÁP NHÂN", "CÁCH MATCH"]
+    headers = ["THỨ TỰ DÒNG GỐC", "DIỄN GIẢI GỐC", "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN", "MÃ ĐỐI TƯỢNG PHÁP NHÂN", "CÁCH MATCH"]
     ws.append(headers)
     for m in all_matches: ws.append([m.get(h, "") for h in headers])
     format_excel_sheet(ws); wb_doichieu.save(path_save_doichieu)
@@ -333,7 +375,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             if tkco_val == "1121" or (tkco_val != "" and tkno_val == ""): ws.cell(row=r, column=col_madtpnno).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
             elif tkno_val == "1121" or (tkno_val != "" and tkco_val == ""): ws.cell(row=r, column=col_madtpnco).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
             else: ws.cell(row=r, column=col_madtpnno).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
-            ws.cell(row=r, column=col_tenkh).value = m["TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN"]
+            ws.cell(row=r, column=col_tenkh).value = m["TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN"]
             if col_ghichu: ws.cell(row=r, column=col_ghichu).value = m["CÁCH MATCH"]
         else:
             for c in range(1, ws.max_column + 1): ws.cell(row=r, column=c).fill = PatternFill(start_color="FFFF00", fill_type="solid")
@@ -356,7 +398,7 @@ def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callba
     for _, row in df_dc.iterrows():
         thu_tu = row.get("THỨ TỰ DÒNG GỐC")
         ma_val = row.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN")
-        ten_val = row.get("TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN", "")
+        ten_val = row.get("TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN", "")
         if pd.notna(thu_tu) and pd.notna(ma_val) and str(ma_val).strip():
             try:
                 key = int(float(thu_tu))
@@ -437,26 +479,57 @@ class AppGomNghiepVu:
     def setup_tab1_interface(self):
         self.file_saoke_path = self.file_master_path = self.file_muavao_path = self.file_banra_path = None
         tk.Label(self.tab1, text="PHẦN MỀM ĐỐI CHIẾU MÃ PHÁP NHÂN TRÊN EXCEL", font=("Arial", 14, "bold"), fg="#4F81BD").pack(pady=10)
-        f_files = tk.Frame(self.tab1); f_files.pack(fill="x", padx=20, pady=5)
-        tk.Button(f_files, text="1. Chọn File Sao Kê (Excel)", command=lambda: self.chon_file("sk1"), width=25).grid(row=0, column=0, pady=5, padx=5)
+
+        f_files = tk.Frame(self.tab1); f_files.pack(fill="x", padx=20, pady=3)
+        tk.Button(f_files, text="1. Chọn File Sao Kê (Excel)", command=lambda: self.chon_file("sk1"), width=25).grid(row=0, column=0, pady=3, padx=5)
         self.lbl_saoke = tk.Label(f_files, text="Chưa chọn file (Bắt buộc)...", fg="gray"); self.lbl_saoke.grid(row=0, column=1, sticky="w")
-        tk.Button(f_files, text="2. Chọn Master MADTPN", command=lambda: self.chon_file("mst"), width=25).grid(row=1, column=0, pady=5, padx=5)
+        tk.Button(f_files, text="2. Chọn Master MADTPN", command=lambda: self.chon_file("mst"), width=25).grid(row=1, column=0, pady=3, padx=5)
         self.lbl_master = tk.Label(f_files, text="Chưa chọn file (Bắt buộc)...", fg="gray"); self.lbl_master.grid(row=1, column=1, sticky="w")
-        tk.Button(f_files, text="3. Chọn File MUA VÀO Năm", command=lambda: self.chon_file("muavao"), width=25).grid(row=2, column=0, pady=5, padx=5)
+        tk.Button(f_files, text="3. Chọn File MUA VÀO Năm", command=lambda: self.chon_file("muavao"), width=25).grid(row=2, column=0, pady=3, padx=5)
         self.lbl_muavao = tk.Label(f_files, text="Chưa chọn file (Không bắt buộc)...", fg="gray"); self.lbl_muavao.grid(row=2, column=1, sticky="w")
-        tk.Button(f_files, text="4. Chọn File BÁN RA Năm", command=lambda: self.chon_file("banra"), width=25).grid(row=3, column=0, pady=5, padx=5)
+        tk.Button(f_files, text="4. Chọn File BÁN RA Năm", command=lambda: self.chon_file("banra"), width=25).grid(row=3, column=0, pady=3, padx=5)
         self.lbl_banra = tk.Label(f_files, text="Chưa chọn file (Không bắt buộc)...", fg="gray"); self.lbl_banra.grid(row=3, column=1, sticky="w")
 
-        # NEW: Chọn thứ tự Ưu tiên
-        f_priority = tk.Frame(self.tab1); f_priority.pack(fill="x", padx=20, pady=8)
-        tk.Label(f_priority, text="Thứ tự Ưu tiên đối soát (chọn 1):", font=("Arial", 10, "bold"), fg="#333").pack(anchor="w")
+        # === PHẦN TÙY CHỌN KIỂU MATCH NÂNG CAO ===
+        f_match = tk.LabelFrame(self.tab1, text=" TÙy chọn kiểu match (P1-P8) - Tick để kích hoạt ", padx=10, pady=5)
+        f_match.pack(fill="x", padx=20, pady=5)
+
+        self.p_vars = {}
+        p_labels = {
+            "P1": "P1 - Khớp tên nguyên vẹn (word boundary)",
+            "P2": "P2 - Khớp ngược (tên nằm trong diễn giải)",
+            "P3": "P3 - Khớp viết tắt (acronym)",
+            "P4": "P4 - Khớp cụm từ (chunk)",
+            "P5": "P5 - Fuzzy AI (bigram similarity ≥ 85%)",
+            "P6": "P6 - Hóa đơn gộp (intersection unique MA)",
+            "P7": "P7 - Hợp đỒng / MATHANG",
+            "P8": "P8 - Số tiền duy nhất (khoảng < 1đ)"
+        }
+
+        # Grid 2 cột cho checkbox
+        for i, (p, label) in enumerate(p_labels.items()):
+            row = i // 2
+            col = i % 2
+            var = tk.BooleanVar(value=True)
+            self.p_vars[p] = var
+            cb = ttk.Checkbutton(f_match, text=label, variable=var)
+            cb.grid(row=row, column=col, sticky="w", padx=5, pady=2)
+
+        # Custom order
+        f_order = tk.Frame(f_match)
+        f_order.grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
+        tk.Label(f_order, text="Thứ tự tùy chỉnh (có thể để trống):", font=("Arial", 9)).pack(side="left")
+        self.custom_order_entry = tk.Entry(f_order, width=35, font=("Arial", 9))
+        self.custom_order_entry.pack(side="left", padx=5)
+        tk.Label(f_order, text="(ví dụ: P6,P7,P8,P1,P5)", font=("Arial", 8), fg="gray").pack(side="left")
+
+        # Radio Ưu tiên cơ bản
+        f_priority = tk.Frame(self.tab1)
+        f_priority.pack(fill="x", padx=20, pady=5)
+        tk.Label(f_priority, text="Nếu không nhập thứ tự tùy chỉnh, dùng:", font=("Arial", 9, "bold")).pack(anchor="w")
         self.priority_var = tk.StringVar(value="name_first")
-        rb_name = ttk.Radiobutton(f_priority, text="✓ Ưu tiên P1-P5 (Khớp TÊn công ty trước) - Mặc định", 
-                                  variable=self.priority_var, value="name_first")
-        rb_name.pack(anchor="w", pady=2)
-        rb_smart = ttk.Radiobutton(f_priority, text="✓ Ưu tiên P6-P8 (Khớp HÓA ĐƠN / HỢP ĐỒNG / TIỀN trước)", 
-                                   variable=self.priority_var, value="smart_first")
-        rb_smart.pack(anchor="w", pady=2)
+        ttk.Radiobutton(f_priority, text="✓ Ưu tiên P1-P5 (Tên) trước", variable=self.priority_var, value="name_first").pack(anchor="w")
+        ttk.Radiobutton(f_priority, text="✓ Ưu tiên P6-P8 (HÓA ĐƠN/HỢP ĐỒNG/TIỀN) trước", variable=self.priority_var, value="smart_first").pack(anchor="w")
 
         f_stop = tk.Frame(self.tab1); f_stop.pack(fill="x", padx=20, pady=5)
         tk.Label(f_stop, text="Nhập Tên Chủ TK cần loại trừ khỏi diễn giải:", font=("Arial", 10, "bold")).pack(anchor="w")
@@ -474,12 +547,28 @@ class AppGomNghiepVu:
         if not p_dc: return
         p_sk = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile="SaoKe_DaCapNhat.xlsx")
         if not p_sk: return
+
         user_stops = self.entry_stop_words.get()
         priority = self.priority_var.get()
+        enabled = [p for p, var in self.p_vars.items() if var.get()]
+        custom_order = self.custom_order_entry.get().strip() or None
+
         self.btn_run_t1.config(state="disabled"); self.progress_var_t1.set(0)
         def task():
             try:
-                process_bank_data(file_saoke=self.file_saoke_path, file_master=self.file_master_path, path_save_doichieu=p_dc, path_save_saokemoi=p_sk, user_stop_str=user_stops, file_muavao=self.file_muavao_path, file_banra=self.file_banra_path, progress_callback=self.t1_update_progress, priority=priority)
+                process_bank_data(
+                    file_saoke=self.file_saoke_path,
+                    file_master=self.file_master_path,
+                    path_save_doichieu=p_dc,
+                    path_save_saokemoi=p_sk,
+                    user_stop_str=user_stops,
+                    file_muavao=self.file_muavao_path,
+                    file_banra=self.file_banra_path,
+                    progress_callback=self.t1_update_progress,
+                    priority=priority,
+                    enabled_ps=enabled,
+                    custom_order=custom_order
+                )
                 self.root.after(0, lambda: messagebox.showinfo("Xong", "Đã đối soát thành công!"))
             except Exception as e:
                 self.root.after(0, lambda e=e: messagebox.showerror("Lỗi", f"Có lỗi xảy ra:\n{str(e)}"))
