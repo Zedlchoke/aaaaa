@@ -12,10 +12,10 @@ from openpyxl.utils import get_column_letter
 from PIL import Image
 
 # ==========================================
-# PHIÊN BẢN SửA GHI CHÚ + FORMAT EXCEL (17/07/2026)
-# - Khi đã match (P1-P8) thì cột "CÁCH MATCH" để trống (không ghi Px)
-# - File KetQua_DoiChieu.xlsx được format đẹp hơn: cột rộng, wrap_text tự động, dễ đọc
-# - Giữ nguyên toàn bộ tính năng tùy chọn P1-P8 + thứ tự
+# PHIÊN BẢN SửA LẠI: GIẢM CÁCH MATCH + CẢI THIỆN CÁC CỘT "QUÉT ĐƯỢC" (17/07/2026)
+# - Cột "CÁCH MATCH" luôn hiển thị P1, P2, P3... để biết phương pháp match
+# - Cải thiện các cột TÊN/HÓA ĐƠN/HỢP ĐỒNG/SỐ TIỀN QUÉT ĐƯỢC: điền đầy đủ thông tin đã quét được từ diễn giải gốc
+# - Format Excel vẫn giữ (column width + wrap)
 # Cài đặt: pip install pandas openpyxl pillow unidecode
 # Chạy: python app.py
 # ==========================================
@@ -63,46 +63,55 @@ def format_excel_sheet(ws, is_doichieu=False):
     header_fill = PatternFill(start_color="4F81BD", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
 
-    # Header
     for cell in ws[1]:
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = thin_border
 
-    # Data rows
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.border = thin_border
             cell.alignment = Alignment(vertical="center", wrap_text=True)
 
-    # === TỐI ƯU WIDTH + WRAP CHO KET QUA DOI CHIEU ===
     if is_doichieu:
-        # Cột 1: THỨ TỰ DÒNG GỐC (nhỏ)
         ws.column_dimensions['A'].width = 8
-        # Cột 2: DIỄN GIẢI GỐC (rất rộng + wrap)
         ws.column_dimensions['B'].width = 55
-        # Cột 3-6: TÊN/HÓA ĐƠN/HỢP ĐỒNG/SỐ TIỀN QUÉT (vừa)
         for col in ['C', 'D', 'E', 'F']:
             ws.column_dimensions[col].width = 22
-        # Cột 7: TÊN MATCH (rộng)
         ws.column_dimensions['G'].width = 40
-        # Cột 8: MÃ (vừa)
         ws.column_dimensions['H'].width = 18
-        # Cột 9: CÁCH MATCH (nhỏ)
-        ws.column_dimensions['I'].width = 12
+        ws.column_dimensions['I'].width = 14
 
-        # Bật wrap_text rõ ràng cho các cột chính
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-            for col_idx in [2, 3, 4, 5, 6, 7]:  # B, C, D, E, F, G
+            for col_idx in [2, 3, 4, 5, 6, 7]:
                 cell = row[col_idx - 1]
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
-
     else:
-        # Format bình thường cho các file khác
         for col_idx in range(1, ws.max_column + 1):
             col_letter = get_column_letter(col_idx)
             ws.column_dimensions[col_letter].width = 18
+
+def parse_amt_to_float(val):
+    if pd.isna(val): return 0.0
+    s = str(val).strip().replace(',', '').replace(' ', '')
+    if not s: return 0.0
+    try: return float(s)
+    except:
+        m = re.search(r'-?\d+(\.\d+)?', s)
+        return float(m.group(0)) if m else 0.0
+
+def load_smart_ktsc(file_path):
+    if not file_path or not os.path.exists(file_path): return []
+    try:
+        df = pd.read_excel(file_path, sheet_name='Smart_KTSC_OK', dtype=str) if 'Smart_KTSC_OK' in pd.ExcelFile(file_path).sheet_names else pd.read_excel(file_path, dtype=str)
+        items = df.to_dict('records')
+        clean_items = []
+        for row in items:
+            clean_items.append({'SO_HD': str(row.get('SO_HD', '')).strip(), 'MATHANG': str(row.get('MATHANG', '')).strip(), 'TTVND': parse_amt_to_float(row.get('TTVND', 0)), 'TTVND_TT': parse_amt_to_float(row.get('TTVND_TT', 0)), COL_MA: str(row.get('MAKH', '')).strip(), COL_TEN_CTY: str(row.get('TENKH', '')).strip()})
+        return clean_items
+    except Exception as e:
+        print(f"Lỗi đọc file: {e}"); return []
 
 # ==========================================
 # LÕI ĐỐI SOÁT SIÊU VIỆT P1 - P8 (TÙY CHỌN KIỂU + THỨ TỰ)
@@ -166,7 +175,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         thu_tu_dong = idx + 2
         diengiai_goc = str(row.get(COL_DIENGIAI, ""))
         if pd.isna(diengiai_goc) or diengiai_goc.strip() == "" or diengiai_goc.lower().strip() == "nan":
-            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
+            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
             continue
 
         diengiai_norm = normalize_basic(diengiai_goc)
@@ -177,25 +186,36 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
 
         matches_for_row = []
 
+        # Lưu trữ thông tin quét được từ diễn giải gốc
+        quet_ten = ""
+        quet_hd = ""
+        quet_hopdong = ""
+        quet_sotien = ""
+
         def try_p1():
+            nonlocal quet_ten
             if "P1" not in enabled_ps: return
             for master_item in master_list:
                 core = master_item['norm_core']
                 if len(core) < 3: continue
                 p1_re = master_item.get('p1_regex')
                 if p1_re and p1_re.search(diengiai_norm):
+                    quet_ten = core.upper()   # tên đã khớp trong diễn giải
                     matches_for_row.append((1, len(core), master_item, core.upper()))
                     return
 
         def try_p2():
+            nonlocal quet_ten
             if "P2" not in enabled_ps: return
             for master_item in master_list:
                 core = master_item['norm_core']
                 if len(diengiai_cleaned) >= 4 and re.search(r'\b' + r'\s+'.join(map(re.escape, diengiai_cleaned.split())) + r'\b', core):
+                    quet_ten = diengiai_cleaned.upper()
                     matches_for_row.append((2, -len(core), master_item, diengiai_cleaned.upper()))
                     return
 
         def try_p3():
+            nonlocal quet_ten
             if "P3" not in enabled_ps: return
             for master_item in master_list:
                 core = master_item['norm_core']
@@ -203,10 +223,12 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 if len(core_words) >= 4:
                     acronym = "".join(w[0] for w in core_words)
                     if len(acronym) >= 4 and re.search(r'\b(?:' + '|'.join(ACTION_VERBS) + r')\b.*?\b' + re.escape(acronym) + r'\b', diengiai_norm):
+                        quet_ten = acronym.upper()
                         matches_for_row.append((3, len(acronym), master_item, acronym.upper()))
                         return
 
         def try_p4():
+            nonlocal quet_ten
             if "P4" not in enabled_ps: return
             for master_item in master_list:
                 core = master_item['norm_core']
@@ -216,6 +238,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     for j in range(i+1, len(core_words)+1):
                         chunk = "".join(core_words[i:j])
                         if ((j - i >= 2 and len(chunk) >= 5) or len(chunk) >= 8) and chunk in diengiai_nospace:
+                            quet_ten = chunk.upper()
                             matches_for_row.append((4, len(chunk), master_item, chunk.upper()))
                             p4_match = True
                             break
@@ -223,6 +246,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 if p4_match: return
 
         def try_p5():
+            nonlocal quet_ten
             if "P5" not in enabled_ps: return
             if len(diengiai_cleaned) >= 5:
                 best_sim = 0.0
@@ -240,9 +264,11 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                                 best_sim = sim
                                 best_master = master_item
                 if best_sim >= 0.85 and best_master is not None:
+                    quet_ten = best_master['norm_core'].upper()
                     matches_for_row.append((5, int(best_sim*100), best_master, f"TÊN AI: {best_master['norm_core'].upper()}"))
 
         def try_p6_p7_p8():
+            nonlocal quet_hd, quet_hopdong, quet_sotien
             if not ("P6" in enabled_ps or "P7" in enabled_ps or "P8" in enabled_ps):
                 return
             if not target_list or amt_val < 5000000:
@@ -277,6 +303,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                             common = set.intersection(*candidate_sets)
                             if len(common) == 1:
                                 matched_ma = list(common)[0]
+                                quet_hd = ', '.join(nums)
                                 matches_for_row.append((6, len(nums), best_item_map[matched_ma], f"SỐ HĐ: {', '.join(nums)}"))
                                 return
                         except:
@@ -303,6 +330,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                         if len(c_clean) >= 5 and c_clean in mathang_clean: matched = True
                         elif any(vp in mathang_upper for vp in valid_parts): matched = True
                         if matched:
+                            quet_hopdong = contract
                             matches_for_row.append((7, len(contract), item, f"HỢP ĐỒNG: {contract}"))
                             return
                     if matches_for_row: break
@@ -315,6 +343,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                         matched_companies.add(item.get(COL_MA))
                         best_item = item
                 if len(matched_companies) == 1:
+                    quet_sotien = f"{amt_val:,.0f}"
                     matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
 
         if order_list:
@@ -348,24 +377,23 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             matches_for_row.sort(key=lambda x: (x[0], -x[1]))
             best_match = matches_for_row[0]
             p_level = best_match[0]
-            match_value = str(best_match[3])
 
-            ten_quet = match_value if p_level <= 5 else ""
-            hd_quet = match_value.replace("SỐ HĐ: ", "") if p_level == 6 else ""
-            hopdong_quet = match_value.replace("HỢP ĐỒNG: ", "") if p_level == 7 else ""
-            sotien_quet = match_value.replace("SỐ TIỀN: ", "") if p_level == 8 else ""
+            # Gán các cột quét được
+            ten_quet = quet_ten if p_level <= 5 else ""
+            hd_quet = quet_hd if p_level == 6 else ""
+            hopdong_quet = quet_hopdong if p_level == 7 else ""
+            sotien_quet = quet_sotien if p_level == 8 else ""
 
-            # === SửA: Khi đã match thì CÁCH MATCH để trống ===
             all_matches.append({
                 "THỨ TỰ DÒNG GỐC": thu_tu_dong,
                 "DIỄN GIẢI GỐC": diengiai_goc,
-                "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": ten_quet,
-                "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": hd_quet,
+                "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": ten_quet,
+                "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": hd_quet,
                 "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": hopdong_quet,
                 "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": sotien_quet,
                 "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_TEN_CTY, ""),
                 "MÃ ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_MA, ""),
-                "CÁCH MATCH": "",   # <--- Để trống khi đã match
+                "CÁCH MATCH": f"P{p_level}",   # <--- Luôn hiển thị Px
                 "SCORE_NUM": 100
             })
         else:
@@ -378,7 +406,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
                 "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "",
                 "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "",
-                "CÁCH MATCH": "",   # Không match
+                "CÁCH MATCH": "",
                 "SCORE_NUM": 0
             })
 
@@ -391,10 +419,10 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     for m in all_matches:
         ws.append([m.get(h, "") for h in headers])
 
-    format_excel_sheet(ws, is_doichieu=True)   # <--- Truyền is_doichieu=True
+    format_excel_sheet(ws, is_doichieu=True)
     wb_doichieu.save(path_save_doichieu)
 
-    # Cập nhật file SaoKê
+    # Cập nhật SaoKê
     wb_saoke = load_workbook(file_saoke)
     ws = wb_saoke.active
     h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
@@ -649,7 +677,7 @@ class AppGomNghiepVu:
 
     def setup_tab3_interface(self):
         self.selected_images = []
-        tk.Label(self.tab3, text="ỨNG DỤNG GOM HÌNH ẢNH THÀNH PDF CHỨNG TỪ", font=("Arial", 13, "bold"), fg="#2E7D32").pack(pady=15)
+        tk.Label(self.tab3, text="ỨNG DỤNG GOM HÌNH ẢNH THÀNH PDF CHứNG TỪ", font=("Arial", 13, "bold"), fg="#2E7D32").pack(pady=15)
         f_btns = tk.Frame(self.tab3); f_btns.pack()
         tk.Button(f_btns, text="+ Chọn Thêm Ảnh (Chọn theo thứ tự trang muốn)", command=self.t3_chon_anh, width=32).grid(row=0, column=0, padx=5)
         tk.Button(f_btns, text="🗑 Xóa Toàn Bộ Danh Sách", command=self.t3_xoa_anh, width=25).grid(row=0, column=1, padx=5)
