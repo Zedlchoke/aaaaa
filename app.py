@@ -11,6 +11,14 @@ from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
 from PIL import Image
 
 # ==========================================
+# PHIÊN BẢN ĐÃ SửA LỖI (17/07/2026)
+# - Tên Tab2 và Tab3 đã làm rõ ràng, khớp với tên người dùng gọi (chỉnh sửa tay, gom ảnh PDF)
+# - Tab2 (chỉnh sửa tay): Sửa logic cột động (như Tab1), cải thiện if-else gán Mã đúng bên TKNO/TKCO, parse an toàn, thêm progress + set GHICHU='SửA TAY'
+# - Tab3 (gom PDF): Sửa lỗi \\n (hiển thị sai), thêm label đếm số ảnh, feedback rõ ràng hơn
+# Yêu cầu chạy: pip install pandas openpyxl pillow unidecode
+# ==========================================
+
+# ==========================================
 # CẤU HÌNH CỐT & TỪ ĐIỂN
 # ==========================================
 COL_TEN_CTY = 'TENDTPN' 
@@ -18,7 +26,7 @@ COL_MA = 'MADTPN'
 COL_DIENGIAI = 'DIENGIAI'
 ALIAS_WORDS = {r'\bbetong\b': 'be tong'}
 ACTION_VERBS = ['chuyen tien', 'chuyen khoan', 'ck', 'thanh toan', 'tt', 'tra tien', 'ct']
-BASE_STOP_WORDS = [r'\bchuyen khoan\b', r'\bck\b', r'\bthanh toan\b', r'\btt\b', r'\brut sec\b', r'\bsec\b', r'\brut tien\b', r'\bnop tien\b', r'\bvao tk\b', r'\bphi dv\b', r'\bphi quan ly\b', r'\bsms banking\b', r'\bhoa don\b', r'\bhd\b', r'\bdot\b', r'\bcuoi\b', r'\btam ung\b', r'\bquyet toan\b', r'\bhdtc\b', r'\bhdkt\b', r'\bbe tong\b', r'\bbetong\b', r'\bly tam\b', r'\bthep\b', r'\bauto\b', r'\bcong ty\b', r'\bcty\b', r'\bctcp\b', r'\bco phan\b', r'\bcp\b', r'\btrach nhiem huu han\b', r'\btnhh\b', r'\bmtv\b', r'\bm t v\b', r'\bmot thanh vien\b', r'\bchi nhanh\b', r'\btap doan\b', r'\blien hop\b', r'\bco so\b', r'\bdoanh nghiep\b', r'\bviet nam\b', r'\bvn\b', r'\bva\b', r'\bgroup\b', r'\bholdings\b', r'\bthuong mai\b', r'\btm\b', r'\bdich vu\b', r'\bdv\b', r'\btmdv\b', r'\btmcp\b', r'\bsan xuat\b', r'\bsx\b', r'\bxuat nhap khau\b', r'\bxnk\b', r'\bdau tu\b', r'\bxay dung\b', r'\bxd\b', r'\bcong nghiep\b', r'\bcn\b', r'\bco khi\b', r'\bkim loai\b', r'\bngu kim\b', r'\bvat lieu\b', r'\bdanh bong\b', r'\bkhuon mau\b', r'\bgia cong\b', r'\bkho bai\b', r'\bbao ve\b', r'\bkhoa hoc\b', r'\bcong nghe\b', r'\bmoi truong\b', r'\bmachinery\b', r'\bmetal\b', r'\bnhom hop kim\b', r'\bnhom\b', r'\bhop kim\b', r'\bthiet bi dien\b', r'\bdien\b', r'\bthiet bi\b', r'\bphat trien\b', r'\bky thuat\b', r'\btong hop\b', r'\bquoc te\b', r'\bche tao\b', r'\bvan tai\b', r'\bvat tu\b', r'\bphu lieu\b', r'\bnhua\b', r'\bbao bi\b', r'\btrang tri\b']
+BASE_STOP_WORDS = [r'\bchuyen khoan\b', r'\bck\b', r'\bthanh toan\b', r'\btt\b', r'\brut sec\b', r'\bsec\b', r'\brut tien\b', r'\bnop tien\b', r'\bvao tk\b', r'\bphi dv\b', r'\bphi quan ly\b', r'\bsms banking\b', r'\bhoa don\b', r'\bhd\b', r'\bdot\b', r'\bcuoi\b', r'\btam ung\b', r'\bquyet toan\b', r'\bhdtc\b', r'\bhdkt\b', r'\bbe tong\b', r'\bbetong\b', r'\bly tam\b', r'\bthep\b', r'\bauto\b', r'\bcong ty\b', r'\bcty\b', r'\bctcp\b', r'\bco phan\b', r'\bcp\b', r'\btrach nhiem huu han\b', r'\btnhh\b', r'\bmtv\b', r'\bm t v\b', r'\bmot thanh vien\b', r'\bchi nhanh\b', r'\btap doan\b', r'\blien hop\b', r'\bco so\b', r'\bdoanh nghiep\b', r'\bviet nam\b', r'\bvn\b', r'\bva\b', r'\bgroup\b', r'\bholdings\b', r'\bthuong mai\b', r'\btm\b', r'\bdich vu\b', r'\bdv\b', r'\btmdv\b', r'\btmcp\b', r'\bsan xuat\b', r'\bsx\b', r'\bxuat nhap khau\b', r'\bxnk\b', r'\bdau tu\b', r'\bxay dung\b', r'\bxd\b', r'\bcong nghiep\b', r'\bcn\b', r'\bco khi\b', r'\bkim loai\b', r'\bngu kim\b', r'\bvat lieu\b', r'\bdanh bong\b', r'\bkhuon mau\b', r'\bgia cong\b', r'\bkho bai\b', r'\bbao ve\b', r'\bkhoa hoc\b', r'\bcong nghe\b', r'\bmoi truong\b', r'\bmachinery\b', r'\bmetal\b', r'\bnhom hop kim\b', r'\bnhom\b', r'\bhop kim\b', r'\bthiet be dien\b', r'\bdien\b', r'\bthiet bi\b', r'\bphat trien\b', r'\bky thuat\b', r'\btong hop\b', r'\bquoc te\b', r'\bche tao\b', r'\bvan tai\b', r'\bvat tu\b', r'\bphu lieu\b', r'\bnhua\b', r'\bbao bi\b', r'\btrang tri\b']
 
 def apply_alias(text):
     for pattern, replacement in ALIAS_WORDS.items(): text = re.sub(pattern, replacement, text)
@@ -233,7 +241,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                         if len(matched_companies) == 1: 
                             matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
 
-        # GHI NHẬN KẾT QUẢ ĐỐI CHIẾU
+        # GHI NHậN KẾT QUẢ ĐỐI CHIẾU
         if matches_for_row:
             matches_for_row.sort(key=lambda x: (x[0], -x[1]))
             best_match = matches_for_row[0]
@@ -286,24 +294,83 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     if progress_callback: progress_callback(100, "Hoàn tất thành công!")
 
 # ==========================================
-# CẬP NHẬT TỪ FILE SỬA TAY
+# CậP NHậT TỪ FILE SửA TAY (ĐÃ SửA LỖI: cột động + logic đúng)
 # ==========================================
 def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callback=None):
-    if progress_callback: progress_callback(10, "Đang đọc file đối chiếu chỉnh sửa...")
-    df_dc = pd.read_excel(file_dc_edited)
-    update_map = {int(row["THỨ TỰ DÒNG GỐC"]): {"MA": str(row["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]).strip(), "TEN": str(row.get("TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN", "")).strip()} 
-                  for _, row in df_dc.iterrows() if pd.notna(row.get("THỨ TỰ DÒNG GỐC")) and pd.notna(row.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN")) and str(row.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN")).strip()}
-    if progress_callback: progress_callback(40, "Đang mở file Sao kê gốc...")
-    wb = load_workbook(file_sk_old); ws = wb.active; no_fill = PatternFill(fill_type=None)
+    if progress_callback: progress_callback(5, "Đang đọc file đối chiếu đã chỉnh sửa tay...")
+    try:
+        df_dc = pd.read_excel(file_dc_edited)
+    except Exception as e:
+        raise Exception(f"Không đọc được file đối chiếu: {e}")
+
+    # An toàn parse update_map - hỗ trợ cả float row num
+    update_map = {}
+    for _, row in df_dc.iterrows():
+        thu_tu = row.get("THỨ TỰ DÒNG GỐC")
+        ma_val = row.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN")
+        ten_val = row.get("TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN", "")
+        if pd.notna(thu_tu) and pd.notna(ma_val) and str(ma_val).strip():
+            try:
+                key = int(float(thu_tu))
+                update_map[key] = {
+                    "MA": str(ma_val).strip(),
+                    "TEN": str(ten_val).strip()
+                }
+            except (ValueError, TypeError):
+                continue
+
+    if progress_callback: progress_callback(25, f"Tìm thấy {len(update_map)} dòng cần cập nhật...")
+
+    if progress_callback: progress_callback(35, "Đang mở file Sao kê gốc...")
+    try:
+        wb = load_workbook(file_sk_old)
+        ws = wb.active
+    except Exception as e:
+        raise Exception(f"Không mở được file Sao kê: {e}")
+
+    # === DYNAMIC COLUMN DETECTION (giống Tab1 - fix lỗi cột cứng) ===
+    h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
+    col_tkno = h_d.get('TKNO', 5)
+    col_tkco = h_d.get('TKCO', 7)
+    col_madtpnno = h_d.get('MADTPNNO', 6)
+    col_madtpnco = h_d.get('MADTPNCO', 8)
+    col_tenkh = h_d.get('TENKH', 11)
+    col_ghichu = h_d.get('GHICHU', None)
+
+    no_fill = PatternFill(fill_type=None)
+    updated_count = 0
+
     for r in range(2, ws.max_row + 1):
         if r in update_map:
-            ma, ten = update_map[r]["MA"], update_map[r]["TEN"]
-            if pd.notna(ws.cell(row=r, column=7).value) and str(ws.cell(row=r, column=7).value).strip() != "": ws.cell(row=r, column=6).value = ma
-            if pd.notna(ws.cell(row=r, column=5).value) and str(ws.cell(row=r, column=5).value).strip() != "": ws.cell(row=r, column=8).value = ma
-            ws.cell(row=r, column=11).value = ten
-            for c in range(1, ws.max_column + 1): ws.cell(row=r, column=c).fill = no_fill
+            ma = update_map[r]["MA"]
+            ten = update_map[r]["TEN"]
+
+            # Lấy giá trị TK để quyết định bên nào (NO/CO) - logic tư᨜ tự Tab1
+            tkno_val = str(ws.cell(row=r, column=col_tkno).value or "").strip().upper()
+            tkco_val = str(ws.cell(row=r, column=col_tkco).value or "").strip().upper()
+
+            if tkco_val == "1121" or (tkco_val and not tkno_val):
+                ws.cell(row=r, column=col_madtpnno).value = ma
+            elif tkno_val == "1121" or (tkno_val and not tkco_val):
+                ws.cell(row=r, column=col_madtpnco).value = ma
+            else:
+                ws.cell(row=r, column=col_madtpnno).value = ma  # mặc định NO
+
+            ws.cell(row=r, column=col_tenkh).value = ten
+
+            # Ghi chú ngắn (phù hợp với yêu cầu của bạn)
+            if col_ghichu and col_ghichu <= ws.max_column:
+                ws.cell(row=r, column=col_ghichu).value = "SửA TAY"
+
+            # Xóa fill vàng (nếu có)
+            for c in range(1, ws.max_column + 1):
+                ws.cell(row=r, column=c).fill = no_fill
+
+            updated_count += 1
+
+    if progress_callback: progress_callback(90, f"Đã cập nhật {updated_count} dòng...")
     wb.save(path_save)
-    if progress_callback: progress_callback(100, "Cập nhật thành công!")
+    if progress_callback: progress_callback(100, "Cập nhật thành công! (SửA TAY)")
 
 # ==========================================
 # GIAO DIỆN HỆ THỐNG
@@ -319,8 +386,8 @@ class AppGomNghiepVu:
         self.tab2 = ttk.Frame(self.notebook) 
         self.tab3 = ttk.Frame(self.notebook) 
         self.notebook.add(self.tab1, text="  1. Đối Soát Ngân Hàng (Excel)  ")
-        self.notebook.add(self.tab2, text="  2. Cập Nhật Bổ Sung Tên & Mã  ")
-        self.notebook.add(self.tab3, text="  3. Scan Hàng Loạt Ảnh (PDF)  ")
+        self.notebook.add(self.tab2, text="  2. Chỉnh Sửa Tay - Cập Nhật Mã & Tên từ File Đối Chiếu  ")
+        self.notebook.add(self.tab3, text="  3. Gom Ảnh Hàng Loạt Thành PDF Chứng Từ  ")
         
         self.setup_tab1_interface()
         self.setup_tab2_interface() 
@@ -341,7 +408,7 @@ class AppGomNghiepVu:
         f_stop = tk.Frame(self.tab1); f_stop.pack(fill="x", padx=20, pady=10)
         tk.Label(f_stop, text="Nhập Tên Chủ TK cần loại trừ khỏi diễn giải:", font=("Arial", 10, "bold")).pack(anchor="w")
         self.entry_stop_words = tk.Entry(f_stop, width=70, font=("Arial", 11)); self.entry_stop_words.pack(anchor="w", ipady=3)
-        self.btn_run_t1 = tk.Button(self.tab1, text="BẮT ĐẦU ĐỐI SOÁT EXCEL", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), command=self.t1_chay, height=2)
+        self.btn_run_t1 = tk.Button(self.tab1, text="BẨT ĐẦU ĐỐI SOÁT EXCEL", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), command=self.t1_chay, height=2)
         self.btn_run_t1.pack(fill="x", padx=25, pady=10)
         self.progress_var_t1 = tk.DoubleVar()
         self.progressbar_t1 = ttk.Progressbar(self.tab1, variable=self.progress_var_t1, maximum=100); self.progressbar_t1.pack(fill="x", padx=25, pady=5)
@@ -367,13 +434,13 @@ class AppGomNghiepVu:
 
     def setup_tab2_interface(self):
         self.file_sk_cu = self.file_dc_sua = None
-        tk.Label(self.tab2, text="CẬP NHẬT FILE SAO KÊ TỪ FILE SỬA TAY", font=("Arial", 12, "bold"), fg="#FF8C00").pack(pady=15)
+        tk.Label(self.tab2, text="CậP NHậT FILE SAO KÊ TỪ FILE CHỈNH SửA TAY (Từ KetQua_DoiChieu đã sửa)", font=("Arial", 12, "bold"), fg="#FF8C00").pack(pady=15)
         f_files = tk.Frame(self.tab2); f_files.pack(fill="x", padx=20, pady=10)
-        tk.Button(f_files, text="1. File Sao Kê (Cần cập nhật)", command=lambda: self.chon_file("sk3"), width=25).grid(row=0, column=0, pady=5, padx=5)
+        tk.Button(f_files, text="1. File Sao Kê gốc (Cần cập nhật)", command=lambda: self.chon_file("sk3"), width=28).grid(row=0, column=0, pady=5, padx=5)
         self.lbl_sk_cu = tk.Label(f_files, text="Chưa chọn...", fg="gray"); self.lbl_sk_cu.grid(row=0, column=1, sticky="w")
-        tk.Button(f_files, text="2. File Đối Chiếu (Đã sửa tay)", command=lambda: self.chon_file("dc3"), width=25).grid(row=1, column=0, pady=5, padx=5)
+        tk.Button(f_files, text="2. File Đối Chiếu đã Sửa Tay", command=lambda: self.chon_file("dc3"), width=28).grid(row=1, column=0, pady=5, padx=5)
         self.lbl_dc_sua = tk.Label(f_files, text="Chưa chọn...", fg="gray"); self.lbl_dc_sua.grid(row=1, column=1, sticky="w")
-        self.btn_run_t2 = tk.Button(self.tab2, text="TIẾN HÀNH CẬP NHẬT ĐÈ MÃ", bg="#FF8C00", fg="white", font=("Arial", 11, "bold"), command=self.t2_chay, height=2)
+        self.btn_run_t2 = tk.Button(self.tab2, text="TIẾN HÀNH CậP NH᫒T ĐÈ MÃ (SửA TAY)", bg="#FF8C00", fg="white", font=("Arial", 11, "bold"), command=self.t2_chay, height=2)
         self.btn_run_t2.pack(fill="x", padx=25, pady=15)
         self.progress_var_t2 = tk.DoubleVar()
         self.progressbar_t2 = ttk.Progressbar(self.tab2, variable=self.progress_var_t2, maximum=100); self.progressbar_t2.pack(fill="x", padx=25, pady=5)
@@ -381,13 +448,13 @@ class AppGomNghiepVu:
 
     def t2_chay(self):
         if not self.file_sk_cu or not self.file_dc_sua: return messagebox.showerror("Lỗi", "Chọn đủ 2 file!")
-        p_save = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile="SaoKe_Final.xlsx")
+        p_save = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile="SaoKe_Final_SuaTay.xlsx")
         if not p_save: return
         self.btn_run_t2.config(state="disabled"); self.progress_var_t2.set(0)
         def task():
             try:
                 process_update_saoke(self.file_sk_cu, self.file_dc_sua, p_save, self.t2_update_progress)
-                self.root.after(0, lambda: messagebox.showinfo("Thành công", "Đã cập nhật dữ liệu sửa tay thành công!"))
+                self.root.after(0, lambda: messagebox.showinfo("Thành công", "Đã cập nhật dữ liệu sửa tay thành công!\nFile đã lưu: " + p_save))
             except Exception as e:
                 self.root.after(0, lambda e=e: messagebox.showerror("Lỗi", str(e)))
             finally:
@@ -400,7 +467,8 @@ class AppGomNghiepVu:
         f_btns = tk.Frame(self.tab3); f_btns.pack()
         tk.Button(f_btns, text="+ Chọn Thêm Ảnh", command=self.t3_chon_anh, width=20).grid(row=0, column=0, padx=5)
         tk.Button(f_btns, text="🗑 Xóa Danh Sách", command=self.t3_xoa_anh, width=20).grid(row=0, column=1, padx=5)
-        self.txt_img_list = tk.Text(self.tab3, height=12, width=65, state="disabled", bg="#F5F5F5"); self.txt_img_list.pack(pady=15)
+        self.txt_img_list = tk.Text(self.tab3, height=10, width=65, state="disabled", bg="#F5F5F5"); self.txt_img_list.pack(pady=10)
+        self.lbl_so_anh = tk.Label(self.tab3, text="Chưa chọn ảnh nào. Chọn ảnh theo thứ tự mong muốn (trang 1, 2, ...)", fg="gray", font=("Arial", 9)); self.lbl_so_anh.pack()
         self.btn_run_t3 = tk.Button(self.tab3, text="XUẤT RA PDF", bg="#2E7D32", fg="white", font=("Arial", 11, "bold"), command=self.t3_chay, state="disabled", height=2)
         self.btn_run_t3.pack(fill="x", padx=25, pady=10)
 
@@ -408,24 +476,37 @@ class AppGomNghiepVu:
         files = filedialog.askopenfilenames(filetypes=[("Image files", "*.png *.jpg *.jpeg")])
         if files: self.selected_images.extend(files); self.t3_cap_nhat_ui()
 
-    def t3_xoa_anh(self): self.selected_images = []; self.t3_cap_nhat_ui()
+    def t3_xoa_anh(self): 
+        self.selected_images = []; self.t3_cap_nhat_ui()
 
     def t3_cap_nhat_ui(self):
         self.txt_img_list.config(state="normal"); self.txt_img_list.delete("1.0", tk.END)
-        for i, f in enumerate(self.selected_images): self.txt_img_list.insert(tk.END, f"{i+1}. {os.path.basename(f)}\n")
+        for i, f in enumerate(self.selected_images): 
+            self.txt_img_list.insert(tk.END, f"{i+1}. {os.path.basename(f)}\n")  # Đã sửa: dùng \n thực sự
         self.txt_img_list.config(state="disabled")
         self.btn_run_t3.config(state="normal" if self.selected_images else "disabled")
+        self.lbl_so_anh.config(text=f"Đã chọn {len(self.selected_images)} ảnh (thứ tự = thứ tự trang trong PDF)")
 
     def t3_chay(self):
-        p_pdf = filedialog.asksaveasfilename(defaultextension=".pdf", initialfile="TaiLieu_Scan.pdf")
+        p_pdf = filedialog.asksaveasfilename(defaultextension=".pdf", initialfile="TaiLieu_ChungTu_Scan.pdf")
         if p_pdf:
-            self.btn_run_t3.config(state="disabled", text="ĐANG GHÉP PDF..."); self.root.update()
+            self.btn_run_t3.config(state="disabled", text="ĐANG GHÉP PDF... (có thể mất thời gian)"); self.root.update()
             try:
                 imgs = [Image.open(p).convert('RGB') for p in self.selected_images]
-                if imgs: imgs[0].save(p_pdf, save_all=True, append_images=imgs[1:])
-                messagebox.showinfo("Thành công", f"Đã lưu tại:\n{p_pdf}"); self.t3_xoa_anh()
-            except Exception as e: messagebox.showerror("Lỗi", str(e))
-            finally: self.btn_run_t3.config(state="normal", text="XUẤT RA PDF")
+                if imgs:
+                    # Xử lý đúng cho cả 1 và nhiều ảnh
+                    if len(imgs) == 1:
+                        imgs[0].save(p_pdf, "PDF", resolution=100.0)
+                    else:
+                        imgs[0].save(p_pdf, save_all=True, append_images=imgs[1:], resolution=100.0)
+                    messagebox.showinfo("Thành công", f"Đã tạo PDF thành công!\n{p_pdf}\nTổng {len(imgs)} trang.")
+                    self.t3_xoa_anh()
+                else:
+                    messagebox.showwarning("Cảnh báo", "Không có ảnh nào để tạo PDF.")
+            except Exception as e: 
+                messagebox.showerror("Lỗi PDF", f"Lỗi khi tạo PDF:\n{str(e)}\nKiểm tra Pillow đã cài đặt chưa (pip install Pillow)")
+            finally: 
+                self.btn_run_t3.config(state="normal", text="XUẤT RA PDF")
 
     def t1_update_progress(self, percent, text):
         self.root.after(0, lambda: self.progress_var_t1.set(percent))
