@@ -41,13 +41,6 @@ def get_bigrams(string):
     s = string.replace(' ', '')
     return [s[i:i+2] for i in range(len(s)-1)] if len(s) > 1 else [s]
 
-def nlp_similarity(s1, s2):
-    if not s1 or not s2: return 0.0
-    bg1, bg2 = get_bigrams(s1), get_bigrams(s2)
-    set1, set2 = set(bg1), set(bg2)
-    if not set1 or not set2: return 0.0
-    return 2.0 * len(set1.intersection(set2)) / (len(set1) + len(set2))
-
 def format_excel_sheet(ws, is_doichieu=False):
     thin_border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
     for cell in ws[1]:
@@ -96,16 +89,18 @@ def load_smart_ktsc(file_path):
     except Exception as e:
         print(f"Lỗi đọc file: {e}"); return []
 
-def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_saokemoi, user_stop_str, file_muavao=None, file_banra=None, progress_callback=None, priority="name_first", enabled_ps=None, custom_order=None):
+def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_saokemoi, user_stop_str, file_muavao=None, file_banra=None, progress_callback=None, enabled_ps=None, custom_order=None):
     dynamic_stops = BASE_STOP_WORDS.copy()
     user_stops = [w.strip() for w in user_stop_str.split(',') if w.strip()]
     for w in user_stops:
         w_norm = normalize_basic(w)
         if w_norm: dynamic_stops.append(r'\b' + re.escape(w_norm) + r'\b')
+        
     if progress_callback: progress_callback(5, "Đang đọc file Excel...")
     df_bank = pd.read_excel(file_saoke)
     df_master = pd.read_excel(file_master)
     master_list = df_master.to_dict('records')
+    
     for item in master_list:
         item['norm_core'] = get_core_name(item.get(COL_TEN_CTY, ""), dynamic_stops)
         core = item['norm_core']
@@ -116,10 +111,12 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         else:
             item['p1_regex'] = None
         item['bigram_set'] = set(get_bigrams(core))
+        
     list_muavao = load_smart_ktsc(file_muavao)
     list_banra = load_smart_ktsc(file_banra)
     hd_index_muavao = {}
     hd_index_banra = {}
+    
     for item in list_muavao:
         hd = str(item.get('SO_HD', '')).strip().lstrip('0') or '0'
         if hd != '0':
@@ -130,37 +127,47 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         if hd != '0':
             if hd not in hd_index_banra: hd_index_banra[hd] = []
             hd_index_banra[hd].append(item)
+            
     hd_pattern_comp = re.compile(r'\b(?:hoa don|hd)\s*(?:so\s*)?((?:\d+(?:\s*(?:,|\+|va\b|-)\s*)*)+)')
+    
     if enabled_ps is None:
         enabled_ps = {"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9"}
     else:
         enabled_ps = set([p.upper() for p in enabled_ps])
+        
     if custom_order:
         try: order_list = [p.strip().upper() for p in str(custom_order).split(',') if p.strip()]
         except: order_list = None
-    else: order_list = None
+    else: 
+        order_list = None
+        
     all_matches = []
     total_rows = len(df_bank)
     h_d_bank = {str(c).strip().upper(): c for c in df_bank.columns}
     col_tkno_name = h_d_bank.get('TKNO', None)
     col_tkco_name = h_d_bank.get('TKCO', None)
     col_tenkh_name_in_df = h_d_bank.get('TENKH', None)
+    
     for idx, row in df_bank.iterrows():
         if progress_callback and idx % 20 == 0: progress_callback(15 + (idx / total_rows) * 65, f"Đối soát dòng {idx+1}...")
         thu_tu_dong = idx + 2
         diengiai_goc = str(row.get(COL_DIENGIAI, ""))
+        
         if pd.isna(diengiai_goc) or diengiai_goc.strip() == "" or diengiai_goc.lower().strip() == "nan":
             all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
             continue
+            
         diengiai_norm = normalize_basic(diengiai_goc)
         diengiai_cleaned = get_core_name(diengiai_goc, dynamic_stops)
         diengiai_nospace = diengiai_norm.replace(" ", "")
         amt_val = parse_amt_to_float(row.get('TTVND', 0))
         if amt_val == 0: amt_val = parse_amt_to_float(row.get('TTVND_TT', 0))
+        
         tkco_val = str(row.get(col_tkco_name, '')).strip() if col_tkco_name else ""
         tkno_val = str(row.get(col_tkno_name, '')).strip() if col_tkno_name else ""
         is_mua_vao = tkco_val.startswith('112')
         is_ban_ra = tkno_val.startswith('112')
+        
         if is_mua_vao and list_muavao:
             current_target_list = list_muavao
             current_hd_index = hd_index_muavao
@@ -170,11 +177,9 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         else:
             current_target_list = list_banra + list_muavao
             current_hd_index = {**hd_index_banra, **hd_index_muavao}
+            
         matches_for_row = []
-        quet_ten = ""
-        quet_hd = ""
-        quet_hopdong = ""
-        quet_sotien = ""
+        quet_ten = quet_hd = quet_hopdong = quet_sotien = ""
         
         def try_p1():
             nonlocal quet_ten
@@ -316,20 +321,16 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     quet_sotien = f"{amt_val:,.0f}"
                     matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
         
-        # P9: Lọc qua TENKH có sẵn trên sao kê đối chiếu trực tiếp với file Mua vào / Bán ra
         def try_p9():
             nonlocal quet_ten
             if "P9" not in enabled_ps: return
             tenkh_goc = str(row.get(col_tenkh_name_in_df, '')) if col_tenkh_name_in_df else ""
             if not tenkh_goc or str(tenkh_goc).strip().lower() in ["", "nan"]: return
-            
             tenkh_goc_norm = unidecode.unidecode(tenkh_goc).lower().strip()
             if not current_target_list: return
-            
             for item in current_target_list:
                 item_tenkh = str(item.get(COL_TEN_CTY, '')).strip()
                 item_tenkh_norm = unidecode.unidecode(item_tenkh).lower().strip()
-                
                 if tenkh_goc_norm == item_tenkh_norm and tenkh_goc_norm != "":
                     quet_ten = tenkh_goc
                     matches_for_row.append((9, 100, item, f"P9 - TRÙNG TÊN KH GỐC"))
@@ -346,16 +347,9 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 elif p == "P9": try_p9()
                 if matches_for_row: break
         else:
-            if priority == "smart_first":
-                try_p6_p7_p8()
-                if not matches_for_row:
-                    try_p1()
-                    try_p2()
-                    try_p3()
-                    try_p4()
-                    try_p5()
-                    if not matches_for_row: try_p9()
-            else:
+            # THAY ĐỔI: Chạy P9 trước tiên làm ưu tiên cao nhất, sau đó mới đến các thuật toán khác
+            try_p9()
+            if not matches_for_row:
                 try_p1()
                 try_p2()
                 try_p3()
@@ -363,7 +357,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 try_p5()
                 if not matches_for_row:
                     try_p6_p7_p8()
-                    if not matches_for_row: try_p9()
 
         if matches_for_row:
             matches_for_row.sort(key=lambda x: (x[0], -x[1]))
@@ -384,6 +377,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     ws.append(headers)
     for m in all_matches: ws.append([m.get(h, "") for h in headers])
     format_excel_sheet(ws, is_doichieu=True)
+    
     ws_legend = wb_doichieu.create_sheet("Giai Thich P1-P9")
     legend_data = [
         ["CÁCH MATCH", "Ý NGHĨA", "MÔ TẢ CHI TIẾT"],
@@ -425,7 +419,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         matched = [m for m in all_matches if m["THỨ TỰ DÒNG GỐC"] == r and m["SCORE_NUM"] == 100]
         if matched:
             m = matched[0]
-            
             ma_dtpn = str(m.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN", "")).strip()
             if ma_dtpn.lower() == "nan": ma_dtpn = ""
             
@@ -439,7 +432,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             ws.cell(row=r, column=col_tenkh).value = m["TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN"]
             if col_ghichu: ws.cell(row=r, column=col_ghichu).value = m["CÁCH MATCH"]
             
-            # Nếu tên có nhưng MÃ rỗng (nan) -> Tô vàng
             if ma_dtpn == "":
                 for c in range(1, ws.max_column + 1): ws.cell(row=r, column=c).fill = yellow_fill
         else:
@@ -448,6 +440,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     if progress_callback: progress_callback(98, "Đang lưu file...")
     wb_saoke.save(path_save_saokemoi)
     if progress_callback: progress_callback(100, "Hoàn tất thành công!")
+
 
 class AppGomNghiepVu:
     def __init__(self, root):
@@ -469,6 +462,7 @@ class AppGomNghiepVu:
     def setup_tab1_interface(self):
         self.file_saoke_path = self.file_master_path = self.file_muavao_path = self.file_banra_path = None
         tk.Label(self.tab1, text="PHẦN MỀM ĐỐI CHIẾU MÃ PHÁP NHÂN TRÊN EXCEL", font=("Arial", 14, "bold"), fg="#4F81BD").pack(pady=10)
+        
         f_files = tk.Frame(self.tab1)
         f_files.pack(fill="x", padx=20, pady=3)
         tk.Button(f_files, text="1. Chọn File Sao Kê (Excel)", command=lambda: self.chon_file("sk1"), width=25).grid(row=0, column=0, pady=3, padx=5)
@@ -486,6 +480,7 @@ class AppGomNghiepVu:
         
         f_match = tk.LabelFrame(self.tab1, text=" Tùy chọn kiểu match (P1-P9) - Tick để kích hoạt ", padx=10, pady=5)
         f_match.pack(fill="x", padx=20, pady=5)
+        
         self.p_vars = {}
         p_labels = {
             "P1": "P1 - Khớp tên nguyên vẹn",
@@ -496,7 +491,7 @@ class AppGomNghiepVu:
             "P6": "P6 - Hóa đơn gộp",
             "P7": "P7 - Hợp đồng / MATHANG",
             "P8": "P8 - Số tiền duy nhất",
-            "P9": "P9 - Dùng TENKH gốc trên sao kê (Không dấu)"
+            "P9": "P9 - Dùng TENKH gốc trên sao kê"
         }
         for i, (p, label) in enumerate(p_labels.items()):
             row = i // 2
@@ -505,24 +500,20 @@ class AppGomNghiepVu:
             self.p_vars[p] = var
             cb = ttk.Checkbutton(f_match, text=label, variable=var)
             cb.grid(row=row, column=col, sticky="w", padx=5, pady=2)
+            
         f_order = tk.Frame(f_match)
         f_order.grid(row=5, column=0, columnspan=2, sticky="w", pady=5)
         tk.Label(f_order, text="Thứ tự tùy chỉnh (trống):", font=("Arial", 9)).pack(side="left")
         self.custom_order_entry = tk.Entry(f_order, width=35, font=("Arial", 9))
         self.custom_order_entry.pack(side="left", padx=5)
         
-        f_priority = tk.Frame(self.tab1)
-        f_priority.pack(fill="x", padx=20, pady=5)
-        self.priority_var = tk.StringVar(value="name_first")
-        ttk.Radiobutton(f_priority, text="✓ Ưu tiên P1-P5 trước", variable=self.priority_var, value="name_first").pack(anchor="w")
-        ttk.Radiobutton(f_priority, text="✓ Ưu tiên P6-P8 trước", variable=self.priority_var, value="smart_first").pack(anchor="w")
-        
         f_stop = tk.Frame(self.tab1)
         f_stop.pack(fill="x", padx=20, pady=5)
         tk.Label(f_stop, text="Nhập Tên Chủ TK cần loại trừ:", font=("Arial", 10, "bold")).pack(anchor="w")
         self.entry_stop_words = tk.Entry(f_stop, width=70, font=("Arial", 11))
         self.entry_stop_words.pack(anchor="w", ipady=3)
-        self.btn_run_t1 = tk.Button(self.tab1, text="BẨT ĐẦU ĐỐI SOÁT EXCEL", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), command=self.t1_chay, height=2)
+        
+        self.btn_run_t1 = tk.Button(self.tab1, text="BẤT ĐẦU ĐỐI SOÁT EXCEL", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), command=self.t1_chay, height=2)
         self.btn_run_t1.pack(fill="x", padx=25, pady=10)
         self.progress_var_t1 = tk.DoubleVar()
         self.progressbar_t1 = ttk.Progressbar(self.tab1, variable=self.progress_var_t1, maximum=100)
@@ -531,25 +522,41 @@ class AppGomNghiepVu:
         self.lbl_status_t1.pack()
 
     def t1_chay(self):
-        if not self.file_saoke_path or not self.file_master_path: return messagebox.showerror("Lỗi", "Vui lòng chọn đủ File Sao kê và File data MADTPN!")
+        if not self.file_saoke_path or not self.file_master_path: 
+            return messagebox.showerror("Lỗi", "Vui lòng chọn đủ File Sao kê và File data MADTPN!")
+        
         p_dc = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile="KetQua_DoiChieu.xlsx")
         if not p_dc: return
         p_sk = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile="SaoKe_DaCapNhat.xlsx")
         if not p_sk: return
+        
         user_stops = self.entry_stop_words.get()
-        priority = self.priority_var.get()
         enabled = [p for p, var in self.p_vars.items() if var.get()]
         custom_order = self.custom_order_entry.get().strip() or None
+        
         self.btn_run_t1.config(state="disabled")
         self.progress_var_t1.set(0)
+        
         def task():
             try:
-                process_bank_data(file_saoke=self.file_saoke_path, file_master=self.file_master_path, path_save_doichieu=p_dc, path_save_saokemoi=p_sk, user_stop_str=user_stops, file_muavao=self.file_muavao_path, file_banra=self.file_banra_path, progress_callback=self.t1_update_progress, priority=priority, enabled_ps=enabled, custom_order=custom_order)
+                process_bank_data(
+                    file_saoke=self.file_saoke_path, 
+                    file_master=self.file_master_path, 
+                    path_save_doichieu=p_dc, 
+                    path_save_saokemoi=p_sk, 
+                    user_stop_str=user_stops, 
+                    file_muavao=self.file_muavao_path, 
+                    file_banra=self.file_banra_path, 
+                    progress_callback=self.t1_update_progress, 
+                    enabled_ps=enabled, 
+                    custom_order=custom_order
+                )
                 self.root.after(0, lambda: messagebox.showinfo("Xong", "Đã đối soát thành công!"))
             except Exception as e:
                 self.root.after(0, lambda e=e: messagebox.showerror("Lỗi", f"Có lỗi xảy ra:\n{str(e)}"))
             finally:
                 self.root.after(0, lambda: self.btn_run_t1.config(state="normal"))
+                
         threading.Thread(target=task, daemon=True).start()
 
     def setup_tab2_interface(self):
