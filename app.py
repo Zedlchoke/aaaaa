@@ -8,14 +8,14 @@ from tkinter import filedialog, messagebox
 from tkinter import ttk
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
+from openpyxl.utils import get_column_letter
 from PIL import Image
 
 # ==========================================
-# PHIÊN BẢN TÙY CHỌN KIỂU MATCH NÂNG CAO (17/07/2026)
-# - Thêm Checkbox cho từng P1 đến P8 (có thể tick 1, 2 hoặc nhiều kiểu)
-# - Thêm ô nhập "Thứ tự Ưu tiên tùy chỉnh" (ví dụ: P6,P7,P8,P1,P5). Để trống = dùng radio Ưu tiên bên dưới
-# - Nếu không chọn gì = chạy đầy đủ P1-P8 theo thứ tự cũ
-# - Tất cả logic P1-P8 giữ nguyên 100%
+# PHIÊN BẢN SửA GHI CHÚ + FORMAT EXCEL (17/07/2026)
+# - Khi đã match (P1-P8) thì cột "CÁCH MATCH" để trống (không ghi Px)
+# - File KetQua_DoiChieu.xlsx được format đẹp hơn: cột rộng, wrap_text tự động, dễ đọc
+# - Giữ nguyên toàn bộ tính năng tùy chọn P1-P8 + thứ tự
 # Cài đặt: pip install pandas openpyxl pillow unidecode
 # Chạy: python app.py
 # ==========================================
@@ -58,36 +58,51 @@ def nlp_similarity(s1, s2):
     if not set1 or not set2: return 0.0
     return 2.0 * len(set1.intersection(set2)) / (len(set1) + len(set2))
 
-def format_excel_sheet(ws):
+def format_excel_sheet(ws, is_doichieu=False):
     thin_border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
+    header_fill = PatternFill(start_color="4F81BD", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+
+    # Header
     for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF"); cell.fill = PatternFill(start_color="4F81BD", fill_type="solid"); cell.alignment = Alignment(horizontal="center", vertical="center"); cell.border = thin_border
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+
+    # Data rows
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.border = thin_border
-            if cell.column in [2, 3, 4, 5, 6, 7]: cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="left")
-            else: cell.alignment = Alignment(vertical="center", horizontal="center")
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
 
-def parse_amt_to_float(val):
-    if pd.isna(val): return 0.0
-    s = str(val).strip().replace(',', '').replace(' ', '')
-    if not s: return 0.0
-    try: return float(s)
-    except:
-        m = re.search(r'-?\d+(\.\d+)?', s)
-        return float(m.group(0)) if m else 0.0
+    # === TỐI ƯU WIDTH + WRAP CHO KET QUA DOI CHIEU ===
+    if is_doichieu:
+        # Cột 1: THỨ TỰ DÒNG GỐC (nhỏ)
+        ws.column_dimensions['A'].width = 8
+        # Cột 2: DIỄN GIẢI GỐC (rất rộng + wrap)
+        ws.column_dimensions['B'].width = 55
+        # Cột 3-6: TÊN/HÓA ĐƠN/HỢP ĐỒNG/SỐ TIỀN QUÉT (vừa)
+        for col in ['C', 'D', 'E', 'F']:
+            ws.column_dimensions[col].width = 22
+        # Cột 7: TÊN MATCH (rộng)
+        ws.column_dimensions['G'].width = 40
+        # Cột 8: MÃ (vừa)
+        ws.column_dimensions['H'].width = 18
+        # Cột 9: CÁCH MATCH (nhỏ)
+        ws.column_dimensions['I'].width = 12
 
-def load_smart_ktsc(file_path):
-    if not file_path or not os.path.exists(file_path): return []
-    try:
-        df = pd.read_excel(file_path, sheet_name='Smart_KTSC_OK', dtype=str) if 'Smart_KTSC_OK' in pd.ExcelFile(file_path).sheet_names else pd.read_excel(file_path, dtype=str)
-        items = df.to_dict('records')
-        clean_items = []
-        for row in items:
-            clean_items.append({'SO_HD': str(row.get('SO_HD', '')).strip(), 'MATHANG': str(row.get('MATHANG', '')).strip(), 'TTVND': parse_amt_to_float(row.get('TTVND', 0)), 'TTVND_TT': parse_amt_to_float(row.get('TTVND_TT', 0)), COL_MA: str(row.get('MAKH', '')).strip(), COL_TEN_CTY: str(row.get('TENKH', '')).strip()})
-        return clean_items
-    except Exception as e:
-        print(f"Lỗi đọc file: {e}"); return []
+        # Bật wrap_text rõ ràng cho các cột chính
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+            for col_idx in [2, 3, 4, 5, 6, 7]:  # B, C, D, E, F, G
+                cell = row[col_idx - 1]
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    else:
+        # Format bình thường cho các file khác
+        for col_idx in range(1, ws.max_column + 1):
+            col_letter = get_column_letter(col_idx)
+            ws.column_dimensions[col_letter].width = 18
 
 # ==========================================
 # LÕI ĐỐI SOÁT SIÊU VIỆT P1 - P8 (TÙY CHỌN KIỂU + THỨ TỰ)
@@ -130,7 +145,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
 
     hd_pattern_comp = re.compile(r'\b(?:hoa don|hd)\s*(?:so\s*)?((?:\d+(?:\s*(?:,|\+|va\b|-)\s*)*)+)')
 
-    # Xử lý enabled_ps và custom_order
     if enabled_ps is None:
         enabled_ps = {"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"}
     else:
@@ -152,7 +166,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         thu_tu_dong = idx + 2
         diengiai_goc = str(row.get(COL_DIENGIAI, ""))
         if pd.isna(diengiai_goc) or diengiai_goc.strip() == "" or diengiai_goc.lower().strip() == "nan":
-            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
+            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
             continue
 
         diengiai_norm = normalize_basic(diengiai_goc)
@@ -163,7 +177,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
 
         matches_for_row = []
 
-        # Hàm con cho từng P (chỉ chạy nếu enabled)
         def try_p1():
             if "P1" not in enabled_ps: return
             for master_item in master_list:
@@ -172,7 +185,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 p1_re = master_item.get('p1_regex')
                 if p1_re and p1_re.search(diengiai_norm):
                     matches_for_row.append((1, len(core), master_item, core.upper()))
-                    return  # chỉ 1 match per master
+                    return
 
         def try_p2():
             if "P2" not in enabled_ps: return
@@ -238,7 +251,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             text_ext = re.sub(r'[^a-z0-9\s/\-\+\,]', ' ', text_ext)
             text_ext = re.sub(r'\s+', ' ', text_ext).strip()
 
-            # P6
             if "P6" in enabled_ps:
                 raw_hd_groups = hd_pattern_comp.findall(text_ext)
                 for hd_group in raw_hd_groups:
@@ -270,7 +282,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                         except:
                             pass
 
-            # P7
             if "P7" in enabled_ps and not matches_for_row:
                 contracts_found = []
                 explicit_contracts = re.findall(r'\bhop dong\s*(?:so\s*)?([a-z0-9/\-]+)\b', text_ext)
@@ -296,7 +307,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                             return
                     if matches_for_row: break
 
-            # P8
             if "P8" in enabled_ps and not matches_for_row:
                 matched_companies = set()
                 best_item = None
@@ -307,9 +317,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 if len(matched_companies) == 1:
                     matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
 
-        # Xây dựng thứ tự chạy
         if order_list:
-            # Dùng thứ tự tùy chỉnh
             for p in order_list:
                 if p == "P1": try_p1()
                 elif p == "P2": try_p2()
@@ -319,7 +327,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 elif p in ("P6", "P7", "P8"): try_p6_p7_p8()
                 if matches_for_row: break
         else:
-            # Dùng radio priority + enabled
             if priority == "smart_first":
                 try_p6_p7_p8()
                 if not matches_for_row:
@@ -337,28 +344,61 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 if not matches_for_row:
                     try_p6_p7_p8()
 
-        # Ghi kết quả
         if matches_for_row:
             matches_for_row.sort(key=lambda x: (x[0], -x[1]))
             best_match = matches_for_row[0]
             p_level = best_match[0]
             match_value = str(best_match[3])
+
             ten_quet = match_value if p_level <= 5 else ""
             hd_quet = match_value.replace("SỐ HĐ: ", "") if p_level == 6 else ""
             hopdong_quet = match_value.replace("HỢP ĐỒNG: ", "") if p_level == 7 else ""
             sotien_quet = match_value.replace("SỐ TIỀN: ", "") if p_level == 8 else ""
-            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": diengiai_goc, "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": ten_quet, "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": hd_quet, "HỢP ĐỒNG QUÉT ĐƯỢC TRONG DIỄN GIẢI": hopdong_quet, "SỐ TIỀN QUÉT ĐƯỢC TRONG DIỄN GIẢI": sotien_quet, "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_TEN_CTY, ""), "MÃ ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_MA, ""), "CÁCH MATCH": f"P{p_level}", "SCORE_NUM": 100})
-        else:
-            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": diengiai_goc, "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRONG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
 
-    wb_doichieu = Workbook(); ws = wb_doichieu.active; ws.title = "Ket Qua Match"
+            # === SửA: Khi đã match thì CÁCH MATCH để trống ===
+            all_matches.append({
+                "THỨ TỰ DÒNG GỐC": thu_tu_dong,
+                "DIỄN GIẢI GỐC": diengiai_goc,
+                "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": ten_quet,
+                "HÓA ĐƠN QUÉT ĐƯỢC TRONG DIỄN GIẢI": hd_quet,
+                "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": hopdong_quet,
+                "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": sotien_quet,
+                "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_TEN_CTY, ""),
+                "MÃ ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_MA, ""),
+                "CÁCH MATCH": "",   # <--- Để trống khi đã match
+                "SCORE_NUM": 100
+            })
+        else:
+            all_matches.append({
+                "THỨ TỰ DÒNG GỐC": thu_tu_dong,
+                "DIỄN GIẢI GỐC": diengiai_goc,
+                "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
+                "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
+                "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
+                "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
+                "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "",
+                "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "",
+                "CÁCH MATCH": "",   # Không match
+                "SCORE_NUM": 0
+            })
+
+    wb_doichieu = Workbook()
+    ws = wb_doichieu.active
+    ws.title = "Ket Qua Match"
     headers = ["THỨ TỰ DÒNG GỐC", "DIỄN GIẢI GỐC", "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN", "MÃ ĐỐI TƯỢNG PHÁP NHÂN", "CÁCH MATCH"]
     ws.append(headers)
-    for m in all_matches: ws.append([m.get(h, "") for h in headers])
-    format_excel_sheet(ws); wb_doichieu.save(path_save_doichieu)
 
-    wb_saoke = load_workbook(file_saoke); ws = wb_saoke.active
+    for m in all_matches:
+        ws.append([m.get(h, "") for h in headers])
+
+    format_excel_sheet(ws, is_doichieu=True)   # <--- Truyền is_doichieu=True
+    wb_doichieu.save(path_save_doichieu)
+
+    # Cập nhật file SaoKê
+    wb_saoke = load_workbook(file_saoke)
+    ws = wb_saoke.active
     h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
+
     col_tkno, col_tkco = h_d.get('TKNO', 5), h_d.get('TKCO', 7)
     col_madtpnno, col_madtpnco = h_d.get('MADTPNNO', 6), h_d.get('MADTPNCO', 8)
     col_tenkh, col_ghichu = h_d.get('TENKH', 11), h_d.get('GHICHU')
@@ -372,13 +412,19 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             tkco_val = str(ws.cell(row=r, column=col_tkco).value).strip() if is_valid_cell(ws.cell(row=r, column=col_tkco).value) else ""
             tkno_val = str(ws.cell(row=r, column=col_tkno).value).strip() if is_valid_cell(ws.cell(row=r, column=col_tkno).value) else ""
 
-            if tkco_val == "1121" or (tkco_val != "" and tkno_val == ""): ws.cell(row=r, column=col_madtpnno).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
-            elif tkno_val == "1121" or (tkno_val != "" and tkco_val == ""): ws.cell(row=r, column=col_madtpnco).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
-            else: ws.cell(row=r, column=col_madtpnno).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
+            if tkco_val == "1121" or (tkco_val != "" and tkno_val == ""):
+                ws.cell(row=r, column=col_madtpnno).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
+            elif tkno_val == "1121" or (tkno_val != "" and tkco_val == ""):
+                ws.cell(row=r, column=col_madtpnco).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
+            else:
+                ws.cell(row=r, column=col_madtpnno).value = m["MÃ ĐỐI TƯỢNG PHÁP NHÂN"]
+
             ws.cell(row=r, column=col_tenkh).value = m["TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN"]
-            if col_ghichu: ws.cell(row=r, column=col_ghichu).value = m["CÁCH MATCH"]
+            if col_ghichu:
+                ws.cell(row=r, column=col_ghichu).value = m["CÁCH MATCH"]
         else:
-            for c in range(1, ws.max_column + 1): ws.cell(row=r, column=c).fill = PatternFill(start_color="FFFF00", fill_type="solid")
+            for c in range(1, ws.max_column + 1):
+                ws.cell(row=r, column=c).fill = PatternFill(start_color="FFFF00", fill_type="solid")
 
     if progress_callback: progress_callback(98, "Đang lưu file...")
     wb_saoke.save(path_save_saokemoi)
@@ -490,7 +536,6 @@ class AppGomNghiepVu:
         tk.Button(f_files, text="4. Chọn File BÁN RA Năm", command=lambda: self.chon_file("banra"), width=25).grid(row=3, column=0, pady=3, padx=5)
         self.lbl_banra = tk.Label(f_files, text="Chưa chọn file (Không bắt buộc)...", fg="gray"); self.lbl_banra.grid(row=3, column=1, sticky="w")
 
-        # === PHẦN TÙY CHỌN KIỂU MATCH NÂNG CAO ===
         f_match = tk.LabelFrame(self.tab1, text=" TÙy chọn kiểu match (P1-P8) - Tick để kích hoạt ", padx=10, pady=5)
         f_match.pack(fill="x", padx=20, pady=5)
 
@@ -506,7 +551,6 @@ class AppGomNghiepVu:
             "P8": "P8 - Số tiền duy nhất (khoảng < 1đ)"
         }
 
-        # Grid 2 cột cho checkbox
         for i, (p, label) in enumerate(p_labels.items()):
             row = i // 2
             col = i % 2
@@ -515,7 +559,6 @@ class AppGomNghiepVu:
             cb = ttk.Checkbutton(f_match, text=label, variable=var)
             cb.grid(row=row, column=col, sticky="w", padx=5, pady=2)
 
-        # Custom order
         f_order = tk.Frame(f_match)
         f_order.grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
         tk.Label(f_order, text="Thứ tự tùy chỉnh (có thể để trống):", font=("Arial", 9)).pack(side="left")
@@ -523,7 +566,6 @@ class AppGomNghiepVu:
         self.custom_order_entry.pack(side="left", padx=5)
         tk.Label(f_order, text="(ví dụ: P6,P7,P8,P1,P5)", font=("Arial", 8), fg="gray").pack(side="left")
 
-        # Radio Ưu tiên cơ bản
         f_priority = tk.Frame(self.tab1)
         f_priority.pack(fill="x", padx=20, pady=5)
         tk.Label(f_priority, text="Nếu không nhập thứ tự tùy chỉnh, dùng:", font=("Arial", 9, "bold")).pack(anchor="w")
@@ -612,7 +654,7 @@ class AppGomNghiepVu:
         tk.Button(f_btns, text="+ Chọn Thêm Ảnh (Chọn theo thứ tự trang muốn)", command=self.t3_chon_anh, width=32).grid(row=0, column=0, padx=5)
         tk.Button(f_btns, text="🗑 Xóa Toàn Bộ Danh Sách", command=self.t3_xoa_anh, width=25).grid(row=0, column=1, padx=5)
         self.txt_img_list = tk.Text(self.tab3, height=10, width=65, state="disabled", bg="#F5F5F5"); self.txt_img_list.pack(pady=10)
-        self.lbl_so_anh = tk.Label(self.tab3, text="Chưa chọn ảnh. Sau khi chọn, thứ tự trong list = thứ tự trang PDF.", fg="gray", font=("Arial", 9)); self.lbl_so_anh.pack()
+        self.lbl_so_anh = tk.Label(self.tab3, text="Chưa chọn ảnh. Sau khi chọn, thứ tự trong list = thứ tự trang trong PDF.", fg="gray", font=("Arial", 9)); self.lbl_so_anh.pack()
         self.btn_run_t3 = tk.Button(self.tab3, text="XUẤT RA PDF CHứNG TỪ", bg="#2E7D32", fg="white", font=("Arial", 11, "bold"), command=self.t3_chay, state="disabled", height=2)
         self.btn_run_t3.pack(fill="x", padx=25, pady=10)
 
