@@ -12,10 +12,11 @@ from openpyxl.utils import get_column_letter
 from PIL import Image
 
 # ==========================================
-# PHIÊN BẢN SửA LẠI: GIẢM CÁCH MATCH + CẢI THIỆN CÁC CỘT "QUÉT ĐƯỢC" (17/07/2026)
-# - Cột "CÁCH MATCH" luôn hiển thị P1, P2, P3... để biết phương pháp match
-# - Cải thiện các cột TÊN/HÓA ĐƠN/HỢP ĐỒNG/SỐ TIỀN QUÉT ĐƯỢC: điền đầy đủ thông tin đã quét được từ diễn giải gốc
-# - Format Excel vẫn giữ (column width + wrap)
+# PHIÊN BẢN: TÁCH MUA VÀO / BÁN RA + LEGEND P1-P8 (17/07/2026)
+# - Thêm logic: TKCO bắt đầu 112 → chỉ dùng file Mua VÀO
+#                    TKNO bắt đầu 112 → chỉ dùng file BÁN RA
+# - Thêm sheet "Giai Thich P1-P8" trong KetQua_DoiChieu.xlsx
+# - Giữ nguyên 100% logic P1-P8 cũ
 # Cài đặt: pip install pandas openpyxl pillow unidecode
 # Chạy: python app.py
 # ==========================================
@@ -46,7 +47,6 @@ def get_core_name(text, stop_words_list):
         for w in stop_words_list: t = re.sub(w, ' ', t)
     return re.sub(r'\s+', ' ', t).strip()
 
-# Thuật toán Vector/Fuzzy 100% Thuần Python (Mới thêm cho P5)
 def get_bigrams(string):
     s = string.replace(' ', '')
     return [s[i:i+2] for i in range(len(s)-1)] if len(s) > 1 else [s]
@@ -114,7 +114,7 @@ def load_smart_ktsc(file_path):
         print(f"Lỗi đọc file: {e}"); return []
 
 # ==========================================
-# LÕI ĐỐI SOÁT SIÊU VIỆT P1 - P8 (TÙY CHỌN KIỂU + THỨ TỰ)
+# LÕI ĐỐI SOÁT P1-P8 (CÓ TÁCH MUA/BÁN + LEGEND)
 # ==========================================
 def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_saokemoi, user_stop_str, file_muavao=None, file_banra=None, progress_callback=None, priority="name_first", enabled_ps=None, custom_order=None):
     dynamic_stops = BASE_STOP_WORDS.copy()
@@ -127,6 +127,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     df_bank = pd.read_excel(file_saoke)
     df_master = pd.read_excel(file_master)
     master_list = df_master.to_dict('records')
+
     for item in master_list:
         item['norm_core'] = get_core_name(item.get(COL_TEN_CTY, ""), dynamic_stops)
         core = item['norm_core']
@@ -137,20 +138,28 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         else:
             item['p1_regex'] = None
         item['bigram_set'] = set(get_bigrams(core))
-    
+
+    # Load riêng Mua VÀO và BÁN RA
     list_muavao = load_smart_ktsc(file_muavao)
     list_banra = load_smart_ktsc(file_banra)
 
-    target_list = []
-    hd_index = {}
-    if list_muavao or list_banra:
-        target_list = list_banra + list_muavao
-        for item in target_list:
-            hd = str(item.get('SO_HD', '')).strip().lstrip('0') or '0'
-            if hd != '0':
-                if hd not in hd_index:
-                    hd_index[hd] = []
-                hd_index[hd].append(item)
+    # Xây dựng HD index riêng cho Mua VÀO và BÁN RA
+    hd_index_muavao = {}
+    hd_index_banra = {}
+
+    for item in list_muavao:
+        hd = str(item.get('SO_HD', '')).strip().lstrip('0') or '0'
+        if hd != '0':
+            if hd not in hd_index_muavao:
+                hd_index_muavao[hd] = []
+            hd_index_muavao[hd].append(item)
+
+    for item in list_banra:
+        hd = str(item.get('SO_HD', '')).strip().lstrip('0') or '0'
+        if hd != '0':
+            if hd not in hd_index_banra:
+                hd_index_banra[hd] = []
+            hd_index_banra[hd].append(item)
 
     hd_pattern_comp = re.compile(r'\b(?:hoa don|hd)\s*(?:so\s*)?((?:\d+(?:\s*(?:,|\+|va\b|-)\s*)*)+)')
 
@@ -170,23 +179,49 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     all_matches = []
     total_rows = len(df_bank)
 
+    # Lấy cột TKNO và TKCO từ df_bank
+    h_d_bank = {str(c).strip().upper(): c for c in df_bank.columns}
+    col_tkno_name = h_d_bank.get('TKNO', None)
+    col_tkco_name = h_d_bank.get('TKCO', None)
+
     for idx, row in df_bank.iterrows():
         if progress_callback and idx % 20 == 0: progress_callback(15 + (idx / total_rows) * 65, f"Đối soát dòng {idx+1}...")
         thu_tu_dong = idx + 2
         diengiai_goc = str(row.get(COL_DIENGIAI, ""))
+
         if pd.isna(diengiai_goc) or diengiai_goc.strip() == "" or diengiai_goc.lower().strip() == "nan":
             all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
             continue
 
         diengiai_norm = normalize_basic(diengiai_goc)
         diengiai_cleaned = get_core_name(diengiai_goc, dynamic_stops)
-        diengiai_nospace = diengiai_norm.replace(" ", "") 
+        diengiai_nospace = diengiai_norm.replace(" ", "")
         amt_val = parse_amt_to_float(row.get('TTVND', 0))
         if amt_val == 0: amt_val = parse_amt_to_float(row.get('TTVND_TT', 0))
 
-        matches_for_row = []
+        # Xác định dòng này là MUA VÀO hay BÁN RA dựa trên TKCO / TKNO
+        tkco_val = str(row.get(col_tkco_name, '')).strip() if col_tkco_name else ""
+        tkno_val = str(row.get(col_tkno_name, '')).strip() if col_tkno_name else ""
 
-        # Lưu trữ thông tin quét được từ diễn giải gốc
+        is_mua_vao = tkco_val.startswith('112')
+        is_ban_ra = tkno_val.startswith('112')
+
+        # Chọn target_list và hd_index phù hợp
+        if is_mua_vao and list_muavao:
+            current_target_list = list_muavao
+            current_hd_index = hd_index_muavao
+            mua_ban_note = "Mua VÀO"
+        elif is_ban_ra and list_banra:
+            current_target_list = list_banra
+            current_hd_index = hd_index_banra
+            mua_ban_note = "BÁN RA"
+        else:
+            # Mặc định: dùng cả hai (giữ hành vi cũ)
+            current_target_list = list_banra + list_muavao
+            current_hd_index = {**hd_index_banra, **hd_index_muavao}
+            mua_ban_note = "Mua+Bán"
+
+        matches_for_row = []
         quet_ten = ""
         quet_hd = ""
         quet_hopdong = ""
@@ -200,7 +235,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 if len(core) < 3: continue
                 p1_re = master_item.get('p1_regex')
                 if p1_re and p1_re.search(diengiai_norm):
-                    quet_ten = core.upper()   # tên đã khớp trong diễn giải
+                    quet_ten = core.upper()
                     matches_for_row.append((1, len(core), master_item, core.upper()))
                     return
 
@@ -271,8 +306,9 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             nonlocal quet_hd, quet_hopdong, quet_sotien
             if not ("P6" in enabled_ps or "P7" in enabled_ps or "P8" in enabled_ps):
                 return
-            if not target_list or amt_val < 5000000:
+            if not current_target_list or amt_val < 5000000:
                 return
+
             text_ext = unidecode.unidecode(str(diengiai_goc)).lower()
             text_ext = re.sub(r'[^a-z0-9\s/\-\+\,]', ' ', text_ext)
             text_ext = re.sub(r'\s+', ' ', text_ext).strip()
@@ -287,7 +323,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     for num in set(nums):
                         num_clean = num.lstrip('0') or '0'
                         if num_clean == '0': continue
-                        cands = hd_index.get(num_clean, [])
+                        cands = current_hd_index.get(num_clean, [])
                         if cands:
                             mas_set = set()
                             for item in cands:
@@ -323,7 +359,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     c_clean = re.sub(r'[^A-Z0-9]', '', contract.upper())
                     parts = re.split(r'[/_.-]', contract.upper())
                     valid_parts = [p for p in parts if len(p) >= 5]
-                    for item in target_list:
+                    for item in current_target_list:
                         mathang_upper = str(item.get('MATHANG', '')).upper()
                         mathang_clean = re.sub(r'[^A-Z0-9]', '', mathang_upper)
                         matched = False
@@ -338,7 +374,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             if "P8" in enabled_ps and not matches_for_row:
                 matched_companies = set()
                 best_item = None
-                for item in target_list:
+                for item in current_target_list:
                     if abs(parse_amt_to_float(item.get('TTVND', 0)) - amt_val) < 1.0 or abs(parse_amt_to_float(item.get('TTVND_TT', 0)) - amt_val) < 1.0:
                         matched_companies.add(item.get(COL_MA))
                         best_item = item
@@ -346,6 +382,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     quet_sotien = f"{amt_val:,.0f}"
                     matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
 
+        # Chạy theo thứ tự
         if order_list:
             for p in order_list:
                 if p == "P1": try_p1()
@@ -378,7 +415,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             best_match = matches_for_row[0]
             p_level = best_match[0]
 
-            # Gán các cột quét được
             ten_quet = quet_ten if p_level <= 5 else ""
             hd_quet = quet_hd if p_level == 6 else ""
             hopdong_quet = quet_hopdong if p_level == 7 else ""
@@ -393,7 +429,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": sotien_quet,
                 "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_TEN_CTY, ""),
                 "MÃ ĐỐI TƯỢNG PHÁP NHÂN": best_match[2].get(COL_MA, ""),
-                "CÁCH MATCH": f"P{p_level}",   # <--- Luôn hiển thị Px
+                "CÁCH MATCH": f"P{p_level}",
                 "SCORE_NUM": 100
             })
         else:
@@ -410,6 +446,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 "SCORE_NUM": 0
             })
 
+    # Ghi file KetQua_DoiChieu
     wb_doichieu = Workbook()
     ws = wb_doichieu.active
     ws.title = "Ket Qua Match"
@@ -420,16 +457,63 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         ws.append([m.get(h, "") for h in headers])
 
     format_excel_sheet(ws, is_doichieu=True)
+
+    # === THÊM SHEET GIẢI THÍCH P1-P8 ===
+    ws_legend = wb_doichieu.create_sheet("Giai Thich P1-P8")
+
+    legend_data = [
+        ["CÁCH MATCH", "Ý NGHĨA", "MÔ TẢ CHI TIẾT"],
+        ["P1", "Khớp tên nguyên vẹn", "Tìm chính xác tên công ty theo từ khóa (word boundary) trong diễn giải"],
+        ["P2", "Khớp ngược", "Tên công ty nằm trong diễn giải (ngược lại)"], 
+        ["P3", "Khớp viết tắt (acronym)", "Dùng chữ cái đầu của từ trong tên công ty kết hợp động từ (chuyển, tt, ck...)"],
+        ["P4", "Khớp cụm từ (chunk)", "Tìm cụm từ dài (từ 2 từ trở lên) trong tên công ty xuất hiện trong diễn giải"],
+        ["P5", "Fuzzy AI (bigram)", "So sánh độ tương đồng tên bằng thuật toán AI (bigram similarity ≥ 85%)"],
+        ["P6", "Hóa đơn (Mua/Bán)", "Tìm số HÓA ĐƠN trong diễn giải → đối chiếu với file Mua VÀO hoặc BÁN RA (chỉ match khi duy nhất 1 công ty)"],
+        ["P7", "Hợp đỒng / MATHANG", "Tìm số HỢP ĐỒNG hoặc tên hàng trong diễn giải → đối chiếu với file Mua VÀO hoặc BÁN RA"],
+        ["P8", "Số tiền duy nhất", "Khớp duy nhất theo số tiền (khoảng cách < 1đ) khi dòng ≥ 5 triệu và có file Mua/Bán"],
+    ]
+
+    thin = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    header_fill2 = PatternFill(start_color="2E7D32", fill_type="solid")
+
+    for r_idx, row_data in enumerate(legend_data, 1):
+        for c_idx, value in enumerate(row_data, 1):
+            cell = ws_legend.cell(row=r_idx, column=c_idx, value=value)
+            cell.border = thin
+            cell.alignment = Alignment(wrap_text=True, vertical="center")
+            if r_idx == 1:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = header_fill2
+            else:
+                cell.fill = PatternFill(start_color="E8F5E9", fill_type="solid")
+
+    ws_legend.column_dimensions['A'].width = 14
+    ws_legend.column_dimensions['B'].width = 25
+    ws_legend.column_dimensions['C'].width = 85
+
+    # Ghi chú thêm
+    ws_legend.cell(row=11, column=1, value="GHI CHÚ:")
+    ws_legend.cell(row=12, column=1, value="- P6, P7, P8 chỉ kích hoạt khi số tiền dòng ≥ 5.000.000 và có file Mua VÀO / BÁN RA")
+    ws_legend.cell(row=13, column=1, value="- Nếu dòng có TKCO bắt đầu 112 → chỉ dùng file Mua VÀO")
+    ws_legend.cell(row=14, column=1, value="- Nếu dòng có TKNO bắt đầu 112 → chỉ dùng file BÁN RA")
+    ws_legend.cell(row=15, column=1, value="- Nếu không rõ Mua hay Bán → dùng cả hai file (hành vi cũ)")
+
+    for r in range(12, 16):
+        ws_legend.cell(row=r, column=1).font = Font(italic=True, color="#333333")
+
     wb_doichieu.save(path_save_doichieu)
 
-    # Cập nhật SaoKê
+    # Cập nhật file SaoKê
     wb_saoke = load_workbook(file_saoke)
     ws = wb_saoke.active
     h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
 
-    col_tkno, col_tkco = h_d.get('TKNO', 5), h_d.get('TKCO', 7)
-    col_madtpnno, col_madtpnco = h_d.get('MADTPNNO', 6), h_d.get('MADTPNCO', 8)
-    col_tenkh, col_ghichu = h_d.get('TENKH', 11), h_d.get('GHICHU')
+    col_tkno = h_d.get('TKNO', 5)
+    col_tkco = h_d.get('TKCO', 7)
+    col_madtpnno = h_d.get('MADTPNNO', 6)
+    col_madtpnco = h_d.get('MADTPNCO', 8)
+    col_tenkh = h_d.get('TENKH', 11)
+    col_ghichu = h_d.get('GHICHU')
 
     def is_valid_cell(val): return pd.notna(val) and str(val).strip() != "" and str(val).lower().strip() != "nan"
 
