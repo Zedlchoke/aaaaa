@@ -11,10 +11,10 @@ from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
 from PIL import Image
 
 # ==========================================
-# PHIÊN BẢN ĐÃ SửA LỖI (17/07/2026)
+# PHIÊN BẢN ĐÃ SửA LỖI (17/07/2026) - Update 2
 # - Tên Tab2 và Tab3 đã làm rõ ràng, khớp với tên người dùng gọi (chỉnh sửa tay, gom ảnh PDF)
 # - Tab2 (chỉnh sửa tay): Sửa logic cột động (như Tab1), cải thiện if-else gán Mã đúng bên TKNO/TKCO, parse an toàn, thêm progress + set GHICHU='SửA TAY'
-# - Tab3 (gom PDF): Sửa lỗi \\n (hiển thị sai), thêm label đếm số ảnh, feedback rõ ràng hơn
+# - Tab3 (gom PDF): Sửa lỗi \n (hiển thị sai line break), thêm label đếm số ảnh, feedback rõ ràng hơn, xử lý PDF 1 hoặc nhiều ảnh đúng
 # Yêu cầu chạy: pip install pandas openpyxl pillow unidecode
 # ==========================================
 
@@ -26,7 +26,7 @@ COL_MA = 'MADTPN'
 COL_DIENGIAI = 'DIENGIAI'
 ALIAS_WORDS = {r'\bbetong\b': 'be tong'}
 ACTION_VERBS = ['chuyen tien', 'chuyen khoan', 'ck', 'thanh toan', 'tt', 'tra tien', 'ct']
-BASE_STOP_WORDS = [r'\bchuyen khoan\b', r'\bck\b', r'\bthanh toan\b', r'\btt\b', r'\brut sec\b', r'\bsec\b', r'\brut tien\b', r'\bnop tien\b', r'\bvao tk\b', r'\bphi dv\b', r'\bphi quan ly\b', r'\bsms banking\b', r'\bhoa don\b', r'\bhd\b', r'\bdot\b', r'\bcuoi\b', r'\btam ung\b', r'\bquyet toan\b', r'\bhdtc\b', r'\bhdkt\b', r'\bbe tong\b', r'\bbetong\b', r'\bly tam\b', r'\bthep\b', r'\bauto\b', r'\bcong ty\b', r'\bcty\b', r'\bctcp\b', r'\bco phan\b', r'\bcp\b', r'\btrach nhiem huu han\b', r'\btnhh\b', r'\bmtv\b', r'\bm t v\b', r'\bmot thanh vien\b', r'\bchi nhanh\b', r'\btap doan\b', r'\blien hop\b', r'\bco so\b', r'\bdoanh nghiep\b', r'\bviet nam\b', r'\bvn\b', r'\bva\b', r'\bgroup\b', r'\bholdings\b', r'\bthuong mai\b', r'\btm\b', r'\bdich vu\b', r'\bdv\b', r'\btmdv\b', r'\btmcp\b', r'\bsan xuat\b', r'\bsx\b', r'\bxuat nhap khau\b', r'\bxnk\b', r'\bdau tu\b', r'\bxay dung\b', r'\bxd\b', r'\bcong nghiep\b', r'\bcn\b', r'\bco khi\b', r'\bkim loai\b', r'\bngu kim\b', r'\bvat lieu\b', r'\bdanh bong\b', r'\bkhuon mau\b', r'\bgia cong\b', r'\bkho bai\b', r'\bbao ve\b', r'\bkhoa hoc\b', r'\bcong nghe\b', r'\bmoi truong\b', r'\bmachinery\b', r'\bmetal\b', r'\bnhom hop kim\b', r'\bnhom\b', r'\bhop kim\b', r'\bthiet be dien\b', r'\bdien\b', r'\bthiet bi\b', r'\bphat trien\b', r'\bky thuat\b', r'\btong hop\b', r'\bquoc te\b', r'\bche tao\b', r'\bvan tai\b', r'\bvat tu\b', r'\bphu lieu\b', r'\bnhua\b', r'\bbao bi\b', r'\btrang tri\b']
+BASE_STOP_WORDS = [r'\bchuyen khoan\b', r'\bck\b', r'\bthanh toan\b', r'\btt\b', r'\brut sec\b', r'\bsec\b', r'\brut tien\b', r'\bnop tien\b', r'\bvao tk\b', r'\bphi dv\b', r'\bphi quan ly\b', r'\bsms banking\b', r'\bhoa don\b', r'\bhd\b', r'\bdot\b', r'\bcuoi\b', r'\btam ung\b', r'\bquyet toan\b', r'\bhdtc\b', r'\bhdkt\b', r'\bbe tong\b', r'\bbetong\b', r'\bly tam\b', r'\bthep\b', r'\bauto\b', r'\bcong ty\b', r'\bcty\b', r'\bctcp\b', r'\bco phan\b', r'\bcp\b', r'\btrach nhiem huu han\b', r'\btnhh\b', r'\bmtv\b', r'\bm t v\b', r'\bmot thanh vien\b', r'\bchi nhanh\b', r'\btap doan\b', r'\blien hop\b', r'\bco so\b', r'\bdoanh nghiep\b', r'\bviet nam\b', r'\bvn\b', r'\bva\b', r'\bgroup\b', r'\bholdings\b', r'\bthuong mai\b', r'\btm\b', r'\bdich vu\b', r'\bdv\b', r'\btmdv\b', r'\btmcp\b', r'\bsan xuat\b', r'\bsx\b', r'\bxuat nhap khau\b', r'\bxnk\b', r'\bdau tu\b', r'\bxay dung\b', r'\bxd\b', r'\bcong nghiep\b', r'\bcn\b', r'\bco khi\b', r'\bkim loai\b', r'\bngu kim\b', r'\bvat lieu\b', r'\bdanh bong\b', r'\bkhuon mau\b', r'\bgia cong\b', r'\bkho bai\b', r'\bbao ve\b', r'\bkhoa hoc\b', r'\bcong nghe\b', r'\bmoi truong\b', r'\bmachinery\b', r'\bmetal\b', r'\bnhom hop kim\b', r'\bnhom\b', r'\bhop kim\b', r'\bthiet bi dien\b', r'\bdien\b', r'\bthiet bi\b', r'\bphat trien\b', r'\bky thuat\b', r'\btong hop\b', r'\bquoc te\b', r'\bche tao\b', r'\bvan tai\b', r'\bvat tu\b', r'\bphu lieu\b', r'\bnhua\b', r'\bbao bi\b', r'\btrang tri\b']
 
 def apply_alias(text):
     for pattern, replacement in ALIAS_WORDS.items(): text = re.sub(pattern, replacement, text)
@@ -482,7 +482,7 @@ class AppGomNghiepVu:
     def t3_cap_nhat_ui(self):
         self.txt_img_list.config(state="normal"); self.txt_img_list.delete("1.0", tk.END)
         for i, f in enumerate(self.selected_images): 
-            self.txt_img_list.insert(tk.END, f"{i+1}. {os.path.basename(f)}\n")  # Đã sửa: dùng \n thực sự
+            self.txt_img_list.insert(tk.END, f"{i+1}. {os.path.basename(f)}\n")  # FIX: dùng \n thực (Python f-string newline)
         self.txt_img_list.config(state="disabled")
         self.btn_run_t3.config(state="normal" if self.selected_images else "disabled")
         self.lbl_so_anh.config(text=f"Đã chọn {len(self.selected_images)} ảnh (thứ tự = thứ tự trang trong PDF)")
