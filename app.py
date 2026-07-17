@@ -12,11 +12,10 @@ from openpyxl.utils import get_column_letter
 from PIL import Image
 
 # ==========================================
-# PHIÊN BẢN: TÁCH MUA VÀO / BÁN RA + LEGEND P1-P8 (17/07/2026)
-# - Thêm logic: TKCO bắt đầu 112 → chỉ dùng file Mua VÀO
-#                    TKNO bắt đầu 112 → chỉ dùng file BÁN RA
-# - Thêm sheet "Giai Thich P1-P8" trong KetQua_DoiChieu.xlsx
-# - Giữ nguyên 100% logic P1-P8 cũ
+# PHIÊN BẢN: FIX PatternFill ARGB + TÁCH MUA/BÁN + LEGEND (17/07/2026)
+# - Sửa lỗi: colors must be aRGB hex values (dùng 8 chữ số ARGB)
+# - Logic tách Mua VÀO / BÁN RA theo TKCO/TKNO
+# - Sheet giải thích P1-P8
 # Cài đặt: pip install pandas openpyxl pillow unidecode
 # Chạy: python app.py
 # ==========================================
@@ -60,7 +59,7 @@ def nlp_similarity(s1, s2):
 
 def format_excel_sheet(ws, is_doichieu=False):
     thin_border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
-    header_fill = PatternFill(start_color="4F81BD", fill_type="solid")
+    header_fill = PatternFill(start_color="FF4F81BD", fill_type="solid")  # ARGB
     header_font = Font(bold=True, color="FFFFFF")
 
     for cell in ws[1]:
@@ -113,9 +112,6 @@ def load_smart_ktsc(file_path):
     except Exception as e:
         print(f"Lỗi đọc file: {e}"); return []
 
-# ==========================================
-# LÕI ĐỐI SOÁT P1-P8 (CÓ TÁCH MUA/BÁN + LEGEND)
-# ==========================================
 def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_saokemoi, user_stop_str, file_muavao=None, file_banra=None, progress_callback=None, priority="name_first", enabled_ps=None, custom_order=None):
     dynamic_stops = BASE_STOP_WORDS.copy()
     user_stops = [w.strip() for w in user_stop_str.split(',') if w.strip()]
@@ -139,11 +135,9 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             item['p1_regex'] = None
         item['bigram_set'] = set(get_bigrams(core))
 
-    # Load riêng Mua VÀO và BÁN RA
     list_muavao = load_smart_ktsc(file_muavao)
     list_banra = load_smart_ktsc(file_banra)
 
-    # Xây dựng HD index riêng cho Mua VÀO và BÁN RA
     hd_index_muavao = {}
     hd_index_banra = {}
 
@@ -179,7 +173,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     all_matches = []
     total_rows = len(df_bank)
 
-    # Lấy cột TKNO và TKCO từ df_bank
     h_d_bank = {str(c).strip().upper(): c for c in df_bank.columns}
     col_tkno_name = h_d_bank.get('TKNO', None)
     col_tkco_name = h_d_bank.get('TKCO', None)
@@ -190,7 +183,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         diengiai_goc = str(row.get(COL_DIENGIAI, ""))
 
         if pd.isna(diengiai_goc) or diengiai_goc.strip() == "" or diengiai_goc.lower().strip() == "nan":
-            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRONG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
+            all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
             continue
 
         diengiai_norm = normalize_basic(diengiai_goc)
@@ -199,14 +192,12 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         amt_val = parse_amt_to_float(row.get('TTVND', 0))
         if amt_val == 0: amt_val = parse_amt_to_float(row.get('TTVND_TT', 0))
 
-        # Xác định dòng này là MUA VÀO hay BÁN RA dựa trên TKCO / TKNO
         tkco_val = str(row.get(col_tkco_name, '')).strip() if col_tkco_name else ""
         tkno_val = str(row.get(col_tkno_name, '')).strip() if col_tkno_name else ""
 
         is_mua_vao = tkco_val.startswith('112')
         is_ban_ra = tkno_val.startswith('112')
 
-        # Chọn target_list và hd_index phù hợp
         if is_mua_vao and list_muavao:
             current_target_list = list_muavao
             current_hd_index = hd_index_muavao
@@ -216,7 +207,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             current_hd_index = hd_index_banra
             mua_ban_note = "BÁN RA"
         else:
-            # Mặc định: dùng cả hai (giữ hành vi cũ)
             current_target_list = list_banra + list_muavao
             current_hd_index = {**hd_index_banra, **hd_index_muavao}
             mua_ban_note = "Mua+Bán"
@@ -382,7 +372,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     quet_sotien = f"{amt_val:,.0f}"
                     matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
 
-        # Chạy theo thứ tự
         if order_list:
             for p in order_list:
                 if p == "P1": try_p1()
@@ -446,7 +435,6 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 "SCORE_NUM": 0
             })
 
-    # Ghi file KetQua_DoiChieu
     wb_doichieu = Workbook()
     ws = wb_doichieu.active
     ws.title = "Ket Qua Match"
@@ -458,7 +446,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
 
     format_excel_sheet(ws, is_doichieu=True)
 
-    # === THÊM SHEET GIẢI THÍCH P1-P8 ===
+    # Sheet giải thích P1-P8
     ws_legend = wb_doichieu.create_sheet("Giai Thich P1-P8")
 
     legend_data = [
@@ -474,7 +462,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     ]
 
     thin = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    header_fill2 = PatternFill(start_color="2E7D32", fill_type="solid")
+    header_fill2 = PatternFill(start_color="FF2E7D32", fill_type="solid")  # ARGB
 
     for r_idx, row_data in enumerate(legend_data, 1):
         for c_idx, value in enumerate(row_data, 1):
@@ -485,13 +473,12 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 cell.font = Font(bold=True, color="FFFFFF")
                 cell.fill = header_fill2
             else:
-                cell.fill = PatternFill(start_color="E8F5E9", fill_type="solid")
+                cell.fill = PatternFill(start_color="FFE8F5E9", fill_type="solid")  # ARGB
 
     ws_legend.column_dimensions['A'].width = 14
     ws_legend.column_dimensions['B'].width = 25
     ws_legend.column_dimensions['C'].width = 85
 
-    # Ghi chú thêm
     ws_legend.cell(row=11, column=1, value="GHI CHÚ:")
     ws_legend.cell(row=12, column=1, value="- P6, P7, P8 chỉ kích hoạt khi số tiền dòng ≥ 5.000.000 và có file Mua VÀO / BÁN RA")
     ws_legend.cell(row=13, column=1, value="- Nếu dòng có TKCO bắt đầu 112 → chỉ dùng file Mua VÀO")
@@ -503,7 +490,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
 
     wb_doichieu.save(path_save_doichieu)
 
-    # Cập nhật file SaoKê
+    # Cập nhật SaoKê
     wb_saoke = load_workbook(file_saoke)
     ws = wb_saoke.active
     h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
@@ -516,6 +503,9 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     col_ghichu = h_d.get('GHICHU')
 
     def is_valid_cell(val): return pd.notna(val) and str(val).strip() != "" and str(val).lower().strip() != "nan"
+
+    no_fill = PatternFill(fill_type=None)
+    yellow_fill = PatternFill(start_color="FFFFFF00", fill_type="solid")  # ARGB
 
     for r in range(2, ws.max_row + 1):
         matched = [m for m in all_matches if m["THỨ TỰ DÒNG GỐC"] == r and m["SCORE_NUM"] == 100]
@@ -536,7 +526,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 ws.cell(row=r, column=col_ghichu).value = m["CÁCH MATCH"]
         else:
             for c in range(1, ws.max_column + 1):
-                ws.cell(row=r, column=c).fill = PatternFill(start_color="FFFF00", fill_type="solid")
+                ws.cell(row=r, column=c).fill = yellow_fill
 
     if progress_callback: progress_callback(98, "Đang lưu file...")
     wb_saoke.save(path_save_saokemoi)
@@ -582,6 +572,7 @@ def process_update_saoke(file_sk_old, file_dc_edited, path_save, progress_callba
     col_ghichu = h_d.get('GHICHU', None)
 
     no_fill = PatternFill(fill_type=None)
+
     updated_count = 0
 
     for r in range(2, ws.max_row + 1):
