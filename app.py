@@ -28,6 +28,71 @@ RE_EXT_INVALID = re.compile(r'[^a-z0-9\s/\-\+\,]')
 RE_MATHANG_CLEAN = re.compile(r'[^A-Z0-9]')
 RE_TEMP_STOP_SPLIT = re.compile(r'[,;|\n\r]+')
 
+
+# ================= TÔ MÀU NGHIỆP VỤ THEO DIỄN GIẢI =================
+# Chỉ dùng để tô màu dòng trong file sao kê xuất ra; không tham gia matching,
+# không ảnh hưởng thuật toán P1-P9, winner-takes-all hay dữ liệu ghi kết quả.
+SPECIAL_HIGHLIGHT_PRIORITY = ("LUONG", "BAO_HIEM", "THUE", "PHI_SMS_NGAN_HANG")
+SPECIAL_HIGHLIGHT_FILLS = {
+    "LUONG": PatternFill(start_color="FFF4CCCC", end_color="FFF4CCCC", fill_type="solid"),              # đỏ nhạt
+    "BAO_HIEM": PatternFill(start_color="FFD9EAD3", end_color="FFD9EAD3", fill_type="solid"),           # xanh lá nhạt
+    "THUE": PatternFill(start_color="FFCFE2F3", end_color="FFCFE2F3", fill_type="solid"),               # xanh dương nhạt
+    "PHI_SMS_NGAN_HANG": PatternFill(start_color="FFFCE5F1", end_color="FFFCE5F1", fill_type="solid"),  # hồng nhạt
+}
+SPECIAL_HIGHLIGHT_PATTERNS = {
+    # Tránh bắt nhầm "số lượng" bằng (?<!so ) trước từ luong.
+    "LUONG": (
+        re.compile(r"\btra\s+luong\b"),
+        re.compile(r"\bchuyen\s+luong\b"),
+        re.compile(r"\bthanh\s+toan\s+luong\b"),
+        re.compile(r"\btt\s+luong\b"),
+        re.compile(r"\bchi\s+luong\b"),
+        re.compile(r"\btien\s+luong\b"),
+        re.compile(r"(?<!so )\bluong\b"),
+    ),
+    "BAO_HIEM": (
+        re.compile(r"\bbao\s+hiem\b"),
+        re.compile(r"\bbhxh\b"),
+        re.compile(r"\bbhyt\b"),
+        re.compile(r"\bbhtn\b"),
+    ),
+    "THUE": (
+        re.compile(r"\bthue\b"),
+        re.compile(r"\btncn\b"),
+        re.compile(r"\btndn\b"),
+        re.compile(r"\bgtgt\b"),
+    ),
+    "PHI_SMS_NGAN_HANG": (
+        # SMS được tô hồng dù có hay không có chữ phí, vì người dùng yêu cầu nhận kiểu "sms".
+        re.compile(r"\bsms\b"),
+        re.compile(r"\btin\s+nhan\s+ngan\s+hang\b"),
+        # Với phí ngân hàng, bắt buộc phải có chữ "phi" đứng trước.
+        re.compile(r"\bphi\s+(?:sms|tin\s+nhan|ngan\s+hang|bank|banking|internet\s+banking|mobile\s+banking|ibanking|e\s*banking|dv|dich\s+vu|quan\s+ly|chuyen\s+tien|ck|ct)\b"),
+        re.compile(r"\bphi\b.{0,40}\bngan\s+hang\b"),
+    ),
+}
+
+
+def detect_special_highlight(text):
+    """Trả về mã loại tô màu nghiệp vụ, hoặc None nếu dòng không thuộc nhóm nào."""
+    text_norm = normalize_basic(text)
+    if not text_norm:
+        return None
+    for highlight_key in SPECIAL_HIGHLIGHT_PRIORITY:
+        for pattern in SPECIAL_HIGHLIGHT_PATTERNS[highlight_key]:
+            if pattern.search(text_norm):
+                return highlight_key
+    return None
+
+
+def apply_row_fill(ws, row_number, fill):
+    """Tô màu nguyên dòng đang tồn tại trong worksheet."""
+    if fill is None:
+        return
+    for column_number in range(1, ws.max_column + 1):
+        ws.cell(row=row_number, column=column_number).fill = fill
+# =====================================================================
+
 RE_WORD_TOKEN = re.compile(r'\b[a-z0-9]+\b')
 ACTION_VERBS_REGEX = re.compile(r'\b(?:' + ACTION_VERBS_PATTERN + r')\b')
 
@@ -909,12 +974,17 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     col_madtpnco = h_d.get('MADTPNCO', 8)
     col_tenkh = h_d.get('TENKH', 11)
     col_ghichu = h_d.get('GHICHU')
+    col_diengiai = h_d.get(COL_DIENGIAI)
 
     def is_valid_cell(value):
         return pd.notna(value) and str(value).strip() != "" and str(value).lower().strip() != "nan"
 
-    yellow_fill = PatternFill(start_color="FFFFFF00", fill_type="solid")
+    yellow_fill = PatternFill(start_color="FFFFFF00", end_color="FFFFFF00", fill_type="solid")
     for row_number in range(2, ws.max_row + 1):
+        diengiai_value = ws.cell(row=row_number, column=col_diengiai).value if col_diengiai else ""
+        highlight_key = detect_special_highlight(diengiai_value)
+        special_fill = SPECIAL_HIGHLIGHT_FILLS.get(highlight_key) if highlight_key else None
+
         match = matches_dict.get(row_number)
         if match is not None:
             ma_dtpn = str(match.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN", "")).strip()
@@ -936,7 +1006,7 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             # QUAN TRỌNG: Nếu dòng không match được thì giữ nguyên dữ liệu sao kê gốc.
             # Bản cũ vẫn đưa dòng No Match vào matches_dict, rồi ghi chuỗi rỗng vào
             # MADTPN/TENKH/GHICHU, làm mất TENKH đã có sẵn trước khi xử lý.
-            # Từ đây: No Match chỉ được tô vàng, tuyệt đối không xóa/ghi đè ô cũ.
+            # Từ đây: No Match chỉ được tô màu, tuyệt đối không xóa/ghi đè ô cũ.
             is_successful_match = bool(ma_dtpn or matched_name) and match_method != "No Match"
 
             if is_successful_match:
@@ -954,12 +1024,14 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                     ws.cell(row=row_number, column=col_tenkh).value = matched_name
                 if col_ghichu and match_method:
                     ws.cell(row=row_number, column=col_ghichu).value = match_method
+
+                # Các dòng nghiệp vụ đặc biệt luôn được tô màu, dù đã match thành công.
+                apply_row_fill(ws, row_number, special_fill)
             else:
-                for column_number in range(1, ws.max_column + 1):
-                    ws.cell(row=row_number, column=column_number).fill = yellow_fill
+                # Nếu vừa No Match vừa thuộc nhóm nghiệp vụ đặc biệt, màu nghiệp vụ ưu tiên hơn màu vàng.
+                apply_row_fill(ws, row_number, special_fill or yellow_fill)
         else:
-            for column_number in range(1, ws.max_column + 1):
-                ws.cell(row=row_number, column=column_number).fill = yellow_fill
+            apply_row_fill(ws, row_number, special_fill or yellow_fill)
 
     if progress_callback:
         progress_callback(98, "Đang lưu file...")
