@@ -604,9 +604,22 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     ttvnd_tt_pos = exact_column_positions.get('TTVND_TT')
 
     all_matches = []
+    all_candidate_rows = []
+    summary_counts = {
+        'source_mua': 0,
+        'source_ban': 0,
+        'source_all': 0,
+        'keyword_luong': 0,
+        'keyword_bao_hiem': 0,
+        'keyword_thue': 0,
+        'keyword_phi_sms_ngan_hang': 0,
+    }
+    candidate_counts_by_p = defaultdict(int)
+    result_counts_by_p = defaultdict(int)
     p7_cache = {}
     p8_cache = {}
     progress_step = max(20, total_rows // 500 if total_rows else 20)
+    default_order_for_audit = ['P9', 'P6', 'P7', 'P8', 'P1', 'P2', 'P3', 'P4', 'P5']
 
     for idx, values in enumerate(df_bank.itertuples(index=False, name=None)):
         if progress_callback and idx % progress_step == 0:
@@ -640,10 +653,23 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         else:
             target_kind = 'all'
 
+        summary_counts[f'source_{target_kind}'] += 1
+        row_highlight_key = detect_special_highlight(diengiai_goc)
+        if row_highlight_key == 'LUONG':
+            summary_counts['keyword_luong'] += 1
+        elif row_highlight_key == 'BAO_HIEM':
+            summary_counts['keyword_bao_hiem'] += 1
+        elif row_highlight_key == 'THUE':
+            summary_counts['keyword_thue'] += 1
+        elif row_highlight_key == 'PHI_SMS_NGAN_HANG':
+            summary_counts['keyword_phi_sms_ngan_hang'] += 1
+
         current_target_list = target_lists[target_kind]
         current_hd_index = target_hd_indexes[target_kind]
         current_name_index = target_name_indexes[target_kind]
         matches_for_row = []
+        row_candidate_results = {}
+        effective_order_for_row = order_list if order_list else default_order_for_audit
 
         # P2 dùng cùng một regex cho toàn bộ master của một dòng; chỉ biên dịch một lần.
         p2_regex = None
@@ -884,7 +910,10 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
 
             if matches_for_row:
                 matches_for_row.sort(key=lambda match: (match[0], -match[1]))
-                return matches_for_row[0]
+                result = matches_for_row[0]
+                row_candidate_results[p] = result
+                candidate_counts_by_p[p] += 1
+                return result
             return None
 
         global global_chay_thuat_toan_func
@@ -894,6 +923,36 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
             master_chot, ghi_chu_chot, bc = luong_tuy_chinh(None, None, order_list)
         else:
             master_chot, ghi_chu_chot, bc = luong_mac_dinh(None, None)
+
+        p_chot_chinh = ''
+        for p_name in effective_order_for_row:
+            if p_name in row_candidate_results:
+                p_chot_chinh = p_name
+                break
+
+        p_gom_bang_chung = set(ghi_chu_chot.split(',')) if ghi_chu_chot and ghi_chu_chot != 'No Match' else set()
+        for priority_index, p_name in enumerate(effective_order_for_row, 1):
+            candidate_result = row_candidate_results.get(p_name)
+            if candidate_result is None:
+                continue
+            matched_item = candidate_result[2]
+            p_role = 'WINNER CHÍNH' if p_name == p_chot_chinh else (
+                'CÙNG ĐỐI TƯỢNG VỚI WINNER - GOM BẰNG CHỨNG' if p_name in p_gom_bang_chung else 'KHÁC ĐỐI TƯỢNG VỚI WINNER - KHÔNG GOM'
+            )
+            all_candidate_rows.append({
+                'THỨ TỰ DÒNG GỐC': thu_tu_dong,
+                'DIỄN GIẢI GỐC': diengiai_goc,
+                'NGUỒN ĐỐI CHIẾU': {'mua': 'MUA VÀO', 'ban': 'BÁN RA', 'all': 'MUA VÀO + BÁN RA'}.get(target_kind, target_kind),
+                'P': p_name,
+                'THỨ TỰ ƯU TIÊN': priority_index,
+                'VAI TRÒ': p_role,
+                'TÊN ỨNG VIÊN': matched_item.get(COL_TEN_CTY, ''),
+                'MÃ ỨNG VIÊN': matched_item.get(COL_MA, ''),
+                'BẰNG CHỨNG': candidate_result[3],
+                'ĐIỂM/ĐỘ DÀI': candidate_result[1],
+                'P WINNER CHÍNH': p_chot_chinh,
+                'CÁCH MATCH SAU GOM': ghi_chu_chot,
+            })
 
         if master_chot:
             all_matches.append({
@@ -937,6 +996,63 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
     for match in all_matches:
         ws.append([match.get(header, "") for header in headers])
     format_excel_sheet(ws, is_doichieu=True)
+
+    # Sheet audit: liệt kê toàn bộ ứng viên mà từng P tìm được.
+    # Sheet này chỉ để kiểm tra; không tham gia winner-takes-all và không thay đổi kết quả.
+    ws_candidates = wb_doichieu.create_sheet("TatCaUngVien")
+    candidate_headers = [
+        'THỨ TỰ DÒNG GỐC', 'DIỄN GIẢI GỐC', 'NGUỒN ĐỐI CHIẾU', 'P', 'THỨ TỰ ƯU TIÊN',
+        'VAI TRÒ', 'TÊN ỨNG VIÊN', 'MÃ ỨNG VIÊN', 'BẰNG CHỨNG', 'ĐIỂM/ĐỘ DÀI',
+        'P WINNER CHÍNH', 'CÁCH MATCH SAU GOM'
+    ]
+    ws_candidates.append(candidate_headers)
+    for row_data in all_candidate_rows:
+        ws_candidates.append([row_data.get(header, '') for header in candidate_headers])
+    format_excel_sheet(ws_candidates)
+    ws_candidates.column_dimensions['A'].width = 12
+    ws_candidates.column_dimensions['B'].width = 55
+    ws_candidates.column_dimensions['C'].width = 18
+    ws_candidates.column_dimensions['F'].width = 40
+    ws_candidates.column_dimensions['G'].width = 42
+    ws_candidates.column_dimensions['I'].width = 38
+    ws_candidates.column_dimensions['L'].width = 18
+
+    # Sheet thống kê xử lý: chỉ tổng hợp từ kết quả đã có, không ảnh hưởng matching.
+    for match in all_matches:
+        cach_match = str(match.get('CÁCH MATCH', '') or '')
+        if cach_match and cach_match != 'No Match':
+            for p_name in cach_match.split(','):
+                if p_name:
+                    result_counts_by_p[p_name] += 1
+
+    ws_summary = wb_doichieu.create_sheet("ThongKeXuLy")
+    summary_rows = [
+        ['CHỈ TIÊU', 'GIÁ TRỊ'],
+        ['Tổng dòng sao kê', total_rows],
+        ['Số dòng match thành công', sum(1 for match in all_matches if str(match.get('CÁCH MATCH', '')) != 'No Match')],
+        ['Số dòng No Match', sum(1 for match in all_matches if str(match.get('CÁCH MATCH', '')) == 'No Match')],
+        ['Tên chủ TK tạm thời đã nhập', ', '.join(temporary_owner_names)],
+        ['Nguồn đối chiếu: Mua vào', summary_counts['source_mua']],
+        ['Nguồn đối chiếu: Bán ra', summary_counts['source_ban']],
+        ['Nguồn đối chiếu: Mua vào + Bán ra', summary_counts['source_all']],
+        ['Dòng tô màu Lương', summary_counts['keyword_luong']],
+        ['Dòng tô màu Bảo hiểm', summary_counts['keyword_bao_hiem']],
+        ['Dòng tô màu Thuế', summary_counts['keyword_thue']],
+        ['Dòng tô màu Phí SMS/ngân hàng', summary_counts['keyword_phi_sms_ngan_hang']],
+        ['', ''],
+        ['P', 'Số ứng viên tìm được'],
+    ]
+    for row_data in summary_rows:
+        ws_summary.append(row_data)
+    for p_name in default_order_for_audit:
+        ws_summary.append([p_name, candidate_counts_by_p.get(p_name, 0)])
+    ws_summary.append(['', ''])
+    ws_summary.append(['P trong CÁCH MATCH sau gom', 'Số dòng xuất hiện'])
+    for p_name in default_order_for_audit:
+        ws_summary.append([p_name, result_counts_by_p.get(p_name, 0)])
+    format_excel_sheet(ws_summary)
+    ws_summary.column_dimensions['A'].width = 42
+    ws_summary.column_dimensions['B'].width = 28
 
     ws_legend = wb_doichieu.create_sheet("Giai Thich P1-P9")
     legend_data = [
@@ -1013,9 +1129,11 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                 # Không bao giờ ghi đè bằng chuỗi rỗng. Nếu một phần kết quả thiếu,
                 # giữ nguyên giá trị cũ của ô đó để tránh mất dữ liệu thủ công/file gốc.
                 if ma_dtpn:
-                    if tkco_val == "1121" or (tkco_val != "" and tkno_val == ""):
+                    tkco_is_bank = tkco_val.startswith("112")
+                    tkno_is_bank = tkno_val.startswith("112")
+                    if tkco_is_bank or (tkco_val != "" and tkno_val == ""):
                         ws.cell(row=row_number, column=col_madtpnno).value = ma_dtpn
-                    elif tkno_val == "1121" or (tkno_val != "" and tkco_val == ""):
+                    elif tkno_is_bank or (tkno_val != "" and tkco_val == ""):
                         ws.cell(row=row_number, column=col_madtpnco).value = ma_dtpn
                     else:
                         ws.cell(row=row_number, column=col_madtpnno).value = ma_dtpn
