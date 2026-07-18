@@ -3,6 +3,7 @@ import unidecode
 import re
 import os
 import threading
+from collections import defaultdict, deque
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import ttk
@@ -19,23 +20,170 @@ ALIAS_WORDS = {r'\bbetong\b': 'be tong'}
 ACTION_VERBS = ['chuyen tien', 'chuyen khoan', 'ck', 'thanh toan', 'tt', 'tra tien', 'ct']
 BASE_STOP_WORDS = [r'\bchuyen khoan\b', r'\bck\b', r'\bthanh toan\b', r'\btt\b', r'\brut sec\b', r'\bsec\b', r'\brut tien\b', r'\bnop tien\b', r'\bvao tk\b', r'\bphi dv\b', r'\bphi quan ly\b', r'\bsms banking\b', r'\bhoa don\b', r'\bhd\b', r'\bdot\b', r'\bcuoi\b', r'\btam ung\b', r'\bquyet toan\b', r'\bhdtc\b', r'\bhdkt\b', r'\bbe tong\b', r'\bbetong\b', r'\bly tam\b', r'\bthep\b', r'\bauto\b', r'\bcong ty\b', r'\bcty\b', r'\bctcp\b', r'\bco phan\b', r'\bcp\b', r'\btrach nhiem huu han\b', r'\btnhh\b', r'\bmtv\b', r'\bm t v\b', r'\bmot thanh vien\b', r'\bchi nhanh\b', r'\btap doan\b', r'\blien hop\b', r'\bco so\b', r'\bdoanh nghiep\b', r'\bviet nam\b', r'\bvn\b', r'\bva\b', r'\bgroup\b', r'\bholdings\b', r'\bthuong mai\b', r'\btm\b', r'\bdich vu\b', r'\bdv\b', r'\btmdv\b', r'\btmcp\b', r'\bsan xuat\b', r'\bsx\b', r'\bxuat nhap khau\b', r'\bxnk\b', r'\bdau tu\b', r'\bxay dung\b', r'\bxd\b', r'\bcong nghiep\b', r'\bcn\b', r'\bco khi\b', r'\bkim loai\b', r'\bngu kim\b', r'\bvat lieu\b', r'\bdanh bong\b', r'\bkhuon mau\b', r'\bgia gia cong\b', r'\bkho bai\b', r'\bbao ve\b', r'\bkhoa hoc\b', r'\bcong nghe\b', r'\bmoi truong\b', r'\bmachinery\b', r'\bmetal\b', r'\bnhom hop kim\b', r'\bnhom\b', r'\bhop kim\b', r'\bthiet bi dien\b', r'\bdien\b', r'\bthiet bi\b', r'\bphat trien\b', r'\bky thuat\b', r'\btong hop\b', r'\bquoc te\b', r'\bche tao\b', r'\bvan tai\b', r'\bvat tu\b', r'\bphu lieu\b', r'\bnhua\b', r'\bbao bi\b', r'\btrang tri\b']
 
+ALIAS_PATTERNS = tuple((re.compile(pattern), replacement) for pattern, replacement in ALIAS_WORDS.items())
+ACTION_VERBS_PATTERN = '|'.join(ACTION_VERBS)
+RE_NON_ALNUM = re.compile(r'[^a-z0-9\s]')
+RE_SPACES = re.compile(r'\s+')
+RE_EXT_INVALID = re.compile(r'[^a-z0-9\s/\-\+\,]')
+RE_MATHANG_CLEAN = re.compile(r'[^A-Z0-9]')
+RE_TEMP_STOP_SPLIT = re.compile(r'[,;|\n\r]+')
+
+RE_WORD_TOKEN = re.compile(r'\b[a-z0-9]+\b')
+ACTION_VERBS_REGEX = re.compile(r'\b(?:' + ACTION_VERBS_PATTERN + r')\b')
+
+
+class AhoMatcher:
+    """Multi-pattern matcher; returns the candidate with the smallest original-order key."""
+
+    def __init__(self, keep_all_outputs=False):
+        self.keep_all_outputs = keep_all_outputs
+        self.children = [{}]
+        self.failure = [0]
+        self.own_best = [None]
+        self.best_output = [None]
+        self.all_outputs = [()]
+        self._built = False
+
+    def add(self, pattern, key, payload):
+        if not pattern:
+            return
+        state = 0
+        for character in pattern:
+            next_state = self.children[state].get(character)
+            if next_state is None:
+                next_state = len(self.children)
+                self.children[state][character] = next_state
+                self.children.append({})
+                self.failure.append(0)
+                self.own_best.append(None)
+                self.best_output.append(None)
+                self.all_outputs.append(())
+            state = next_state
+        candidate = (key, payload, len(pattern))
+        current = self.own_best[state]
+        if current is None or key < current[0]:
+            self.own_best[state] = candidate
+
+    def build(self):
+        queue = deque()
+        self.best_output[0] = self.own_best[0]
+        self.all_outputs[0] = ((self.own_best[0],) if self.own_best[0] is not None else ())
+        for child_state in self.children[0].values():
+            self.failure[child_state] = 0
+            queue.append(child_state)
+
+        while queue:
+            state = queue.popleft()
+            fail_state = self.failure[state]
+            own = self.own_best[state]
+            if self.keep_all_outputs:
+                inherited = self.all_outputs[fail_state]
+                outputs = ((own,) if own is not None else ()) + inherited
+                self.all_outputs[state] = tuple(sorted(outputs, key=lambda item: item[0]))
+            else:
+                inherited = self.best_output[fail_state]
+                if own is None:
+                    self.best_output[state] = inherited
+                elif inherited is None or own[0] <= inherited[0]:
+                    self.best_output[state] = own
+                else:
+                    self.best_output[state] = inherited
+
+            for character, child_state in self.children[state].items():
+                fallback = self.failure[state]
+                while fallback and character not in self.children[fallback]:
+                    fallback = self.failure[fallback]
+                self.failure[child_state] = self.children[fallback].get(character, 0)
+                queue.append(child_state)
+        self._built = True
+
+    def find_best(self, text, boundary_check=None):
+        if not self._built or not text:
+            return None
+        state = 0
+        winner = None
+        for end_index, character in enumerate(text):
+            while state and character not in self.children[state]:
+                state = self.failure[state]
+            state = self.children[state].get(character, 0)
+
+            if self.keep_all_outputs:
+                for candidate in self.all_outputs[state]:
+                    if winner is not None and candidate[0] >= winner[0]:
+                        break
+                    start_index = end_index - candidate[2] + 1
+                    if boundary_check is None or boundary_check(start_index, end_index, candidate):
+                        winner = candidate
+                        if candidate[0] == 0:
+                            return candidate
+            else:
+                candidate = self.best_output[state]
+                if candidate is not None and (winner is None or candidate[0] < winner[0]):
+                    winner = candidate
+                    # Tuple key (0, 0) and integer key 0 are absolute minima.
+                    if candidate[0] == 0 or candidate[0] == (0, 0):
+                        return candidate
+        return winner
+
+
 def apply_alias(text):
-    for pattern, replacement in ALIAS_WORDS.items():
-        text = re.sub(pattern, replacement, text)
+    for pattern, replacement in ALIAS_PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
+
 def normalize_basic(text):
-    if pd.isna(text): return ""
-    t = unidecode.unidecode(str(text)).lower().strip()
-    t = apply_alias(t)
-    t = re.sub(r'[^a-z0-9\s]', ' ', t)
-    return re.sub(r'\s+', ' ', t).strip()
+    if pd.isna(text):
+        return ""
+    normalized = unidecode.unidecode(str(text)).lower().strip()
+    normalized = apply_alias(normalized)
+    normalized = RE_NON_ALNUM.sub(' ', normalized)
+    return RE_SPACES.sub(' ', normalized).strip()
+
 
 def get_core_name(text, stop_words_list):
-    t = normalize_basic(text)
+    normalized = normalize_basic(text)
     for _ in range(2):
-        for w in stop_words_list: t = re.sub(w, ' ', t)
-    return re.sub(r'\s+', ' ', t).strip()
+        for stop_word in stop_words_list:
+            normalized = re.sub(stop_word, ' ', normalized)
+    return RE_SPACES.sub(' ', normalized).strip()
+
+
+def parse_temporary_owner_names(owner_names_text):
+    """Chuẩn hóa và loại trùng tên chủ tài khoản; không lưu ra cấu hình."""
+    seen = set()
+    result = []
+    for raw_name in RE_TEMP_STOP_SPLIT.split(owner_names_text or ""):
+        normalized_name = normalize_basic(raw_name)
+        if normalized_name and normalized_name not in seen:
+            seen.add(normalized_name)
+            result.append(normalized_name)
+    return result
+
+
+def build_temporary_owner_variants(owner_names_text):
+    """Trả về tên đầy đủ và tên lõi của chủ tài khoản, đã chuẩn hóa và loại trùng."""
+    temporary_names = parse_temporary_owner_names(owner_names_text)
+    owner_variants = []
+    seen_variants = set()
+    for name in temporary_names:
+        core_name = get_core_name(name, BASE_STOP_WORDS)
+        for variant in (name, core_name):
+            if variant and variant not in seen_variants:
+                seen_variants.add(variant)
+                owner_variants.append(variant)
+    return temporary_names, owner_variants
+
+
+def build_temporary_stop_words(owner_names_text):
+    """Tạo stop words riêng cho đúng một lần chạy, không sửa BASE_STOP_WORDS."""
+    temporary_names, owner_variants = build_temporary_owner_variants(owner_names_text)
+
+    # Đặt tên chủ tài khoản trước stop words nền để tên pháp lý đầy đủ vẫn được
+    # loại bỏ trước khi các cụm như "công ty", "TNHH", "MTV" bị xóa riêng lẻ.
+    dynamic_stops = [r'\b' + re.escape(name) + r'\b' for name in owner_variants]
+    dynamic_stops.extend(BASE_STOP_WORDS)
+    return dynamic_stops, temporary_names
 
 def get_bigrams(string):
     s = string.replace(' ', '')
@@ -43,14 +191,18 @@ def get_bigrams(string):
 
 def format_excel_sheet(ws, is_doichieu=False):
     thin_border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    body_alignment = Alignment(vertical="center", wrap_text=True)
+    top_alignment = Alignment(wrap_text=True, vertical="top")
     for cell in ws[1]:
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.font = header_font
+        cell.alignment = header_alignment
         cell.border = thin_border
     for row in ws.iter_rows(min_row=2):
         for cell in row:
             cell.border = thin_border
-            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            cell.alignment = body_alignment
     if is_doichieu:
         ws.column_dimensions['A'].width = 8
         ws.column_dimensions['B'].width = 55
@@ -62,7 +214,7 @@ def format_excel_sheet(ws, is_doichieu=False):
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
             for col_idx in [2, 3, 4, 5, 6, 7]:
                 cell = row[col_idx - 1]
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                cell.alignment = top_alignment
     else:
         for col_idx in range(1, ws.max_column + 1):
             col_letter = get_column_letter(col_idx)
@@ -80,7 +232,9 @@ def parse_amt_to_float(val):
 def load_smart_ktsc(file_path):
     if not file_path or not os.path.exists(file_path): return []
     try:
-        df = pd.read_excel(file_path, sheet_name='Smart_KTSC_OK', dtype=str) if 'Smart_KTSC_OK' in pd.ExcelFile(file_path).sheet_names else pd.read_excel(file_path, dtype=str)
+        with pd.ExcelFile(file_path) as excel_file:
+            sheet_name = 'Smart_KTSC_OK' if 'Smart_KTSC_OK' in excel_file.sheet_names else excel_file.sheet_names[0]
+            df = pd.read_excel(excel_file, sheet_name=sheet_name, dtype=str)
         items = df.to_dict('records')
         clean_items = []
         for row in items:
@@ -168,173 +322,365 @@ def chay_thuat_toan(p, giao_dich, danh_sach_cong_ty):
 # =================================================================
 
 def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_saokemoi, user_stop_str, file_muavao=None, file_banra=None, progress_callback=None, enabled_ps=None, custom_order=None):
-    dynamic_stops = BASE_STOP_WORDS.copy()
-    user_stops = [w.strip() for w in user_stop_str.split(',') if w.strip()]
-    for w in user_stops:
-        w_norm = normalize_basic(w)
-        if w_norm: dynamic_stops.append(r'\b' + re.escape(w_norm) + r'\b')
-        
-    if progress_callback: progress_callback(5, "Đang đọc file Excel...")
+    """
+    Xử lý đối soát giữ nguyên toàn bộ thuật toán P1-P9.
+
+    Các tối ưu chỉ gồm:
+    - tiền xử lý/caching dữ liệu bất biến;
+    - tránh biên dịch regex và tạo chuỗi lặp lại trong từng vòng master;
+    - dùng itertuples thay iterrows;
+    - cache kết quả tra cứu P7/P8 và index tên cho P9;
+    - stop words do người dùng nhập chỉ tồn tại trong lần chạy hiện tại.
+    """
+    dynamic_stops, temporary_owner_names = build_temporary_stop_words(user_stop_str)
+    _, temporary_owner_variants = build_temporary_owner_variants(user_stop_str)
+    compiled_stop_patterns = tuple(re.compile(pattern) for pattern in dynamic_stops)
+    compiled_owner_pattern = (
+        re.compile('|'.join(r'\b' + re.escape(name) + r'\b' for name in temporary_owner_variants))
+        if temporary_owner_variants else None
+    )
+
+    def exact_get_core_name(text):
+        # Giữ đúng thứ tự và đúng 2 lượt loại stop-word như mã gốc.
+        t = normalize_basic(text)
+        for _ in range(2):
+            for pattern in compiled_stop_patterns:
+                t = pattern.sub(' ', t)
+        return RE_SPACES.sub(' ', t).strip()
+
+    if progress_callback:
+        stop_note = f"; {len(temporary_owner_names)} tên chủ TK tạm thời" if temporary_owner_names else ""
+        progress_callback(5, f"Đang đọc file Excel{stop_note}...")
+
     df_bank = pd.read_excel(file_saoke)
     df_master = pd.read_excel(file_master)
     master_list = df_master.to_dict('records')
-    
-    for item in master_list:
-        item['norm_core'] = get_core_name(item.get(COL_TEN_CTY, ""), dynamic_stops)
+
+    # Tiền xử lý Master một lần. Thứ tự master_list được giữ nguyên tuyệt đối.
+    bigram_master_index = defaultdict(list)
+    p1_matcher = AhoMatcher(keep_all_outputs=True)
+    p4_matcher = AhoMatcher()
+    p2_phrase_index = {}
+    p3_acronym_index = {}
+    for master_index, item in enumerate(master_list):
+        item['norm_core'] = exact_get_core_name(item.get(COL_TEN_CTY, ""))
         core = item['norm_core']
+        core_words = core.split()
+        item['core_words'] = core_words
+
         if len(core) >= 3:
-            core_words = core.split()
             p1_pat = r'\b' + r'\s*'.join(map(re.escape, core_words)) + r'\b'
             item['p1_regex'] = re.compile(p1_pat)
+            p1_matcher.add(''.join(core_words), master_index, master_index)
         else:
             item['p1_regex'] = None
-        item['bigram_set'] = set(get_bigrams(core))
-        
+
+        # P2: trên chuỗi đã normalize, regex cũ tương đương một cụm từ nguyên vẹn
+        # gồm các token liên tiếp. Lưu master đầu tiên cho từng cụm để giữ thứ tự cũ.
+        for phrase_start in range(len(core_words)):
+            phrase_parts = []
+            for phrase_end in range(phrase_start, len(core_words)):
+                phrase_parts.append(core_words[phrase_end])
+                phrase = ' '.join(phrase_parts)
+                if phrase not in p2_phrase_index:
+                    p2_phrase_index[phrase] = master_index
+
+        if len(core_words) >= 4:
+            acronym = "".join(word[0] for word in core_words)
+            item['acronym'] = acronym
+            item['p3_regex'] = (
+                re.compile(r'\b(?:' + ACTION_VERBS_PATTERN + r')\b.*?\b' + re.escape(acronym) + r'\b')
+                if len(acronym) >= 4 else None
+            )
+            if len(acronym) >= 4 and acronym not in p3_acronym_index:
+                p3_acronym_index[acronym] = master_index
+        else:
+            item['acronym'] = ""
+            item['p3_regex'] = None
+
+        # Giữ đúng thứ tự i/j của P4 trong mã gốc.
+        p4_chunks = []
+        for i in range(len(core_words)):
+            for j in range(i + 1, len(core_words) + 1):
+                chunk = "".join(core_words[i:j])
+                if ((j - i >= 2 and len(chunk) >= 5) or len(chunk) >= 8):
+                    p4_chunks.append(chunk)
+        item['p4_chunks'] = p4_chunks
+
+        bigram_set = frozenset(get_bigrams(core))
+        item['bigram_set'] = bigram_set
+        for chunk_order, chunk in enumerate(p4_chunks):
+            p4_matcher.add(chunk, (master_index, chunk_order), (master_index, chunk))
+
+        for bigram in bigram_set:
+            bigram_master_index[bigram].append(master_index)
+
+    p1_matcher.build()
+    p4_matcher.build()
+
     list_muavao = load_smart_ktsc(file_muavao)
     list_banra = load_smart_ktsc(file_banra)
-    hd_index_muavao = {}
-    hd_index_banra = {}
-    
-    for item in list_muavao:
-        hd = str(item.get('SO_HD', '')).strip().lstrip('0') or '0'
-        if hd != '0':
-            if hd not in hd_index_muavao: hd_index_muavao[hd] = []
-            hd_index_muavao[hd].append(item)
-    for item in list_banra:
-        hd = str(item.get('SO_HD', '')).strip().lstrip('0') or '0'
-        if hd != '0':
-            if hd not in hd_index_banra: hd_index_banra[hd] = []
-            hd_index_banra[hd].append(item)
-            
+
+    def build_hd_index(items):
+        result = {}
+        for item in items:
+            hd = str(item.get('SO_HD', '')).strip().lstrip('0') or '0'
+            if hd != '0':
+                result.setdefault(hd, []).append(item)
+        return result
+
+    hd_index_muavao = build_hd_index(list_muavao)
+    hd_index_banra = build_hd_index(list_banra)
+
+    # Tiền xử lý Mua/Bán cho P7/P9, không sửa dữ liệu đầu vào và không đổi thứ tự.
+    for item in list_muavao + list_banra:
+        ten_cty = str(item.get(COL_TEN_CTY, '')).strip()
+        item['tenkh_norm'] = unidecode.unidecode(ten_cty).lower() if ten_cty else ""
+        mathang_upper = str(item.get('MATHANG', '')).upper()
+        item['mathang_upper'] = mathang_upper
+        item['mathang_clean'] = RE_MATHANG_CLEAN.sub('', mathang_upper)
+
+    for master_item in master_list:
+        ten_cty_master = str(master_item.get(COL_TEN_CTY, '')).strip()
+        master_item['tenkh_norm'] = unidecode.unidecode(ten_cty_master).lower() if ten_cty_master else ""
+
+    # Các tập hợp đích được tạo một lần thay vì ghép lại trên từng dòng.
+    combined_target_list = list_banra + list_muavao
+    combined_hd_index = {**hd_index_banra, **hd_index_muavao}
+
+    target_lists = {
+        'mua': list_muavao,
+        'ban': list_banra,
+        'all': combined_target_list,
+    }
+    target_hd_indexes = {
+        'mua': hd_index_muavao,
+        'ban': hd_index_banra,
+        'all': combined_hd_index,
+    }
+
+    def build_first_name_index(items):
+        index = {}
+        for item in items:
+            normalized_name = item.get('tenkh_norm', '')
+            if normalized_name and normalized_name not in index:
+                index[normalized_name] = item
+        return index
+
+    target_name_indexes = {kind: build_first_name_index(items) for kind, items in target_lists.items()}
+    master_name_index = build_first_name_index(master_list)
+
     hd_pattern_comp = re.compile(r'\b(?:hoa don|hd)\s*(?:so\s*)?((?:\d+(?:\s*(?:,|\+|va\b|-)\s*)*)+)')
-    
+    p7_hopdong_pattern = re.compile(r'\bhop dong\s*(?:so\s*)?([a-z0-9/\-]+)\b')
+    p7_hopdong_spaced_pattern = re.compile(r'\bhop dong\s*(?:so\s*)?\d+\s+([a-z0-9/\-]+)\b')
+    p7_hd_pattern = re.compile(r'\bhd\s*(?:so\s*)?([a-z0-9/\-]+)\b')
+
     if enabled_ps is None:
         enabled_ps = {"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9"}
     else:
-        enabled_ps = set([p.upper() for p in enabled_ps])
-        
+        enabled_ps = {p.upper() for p in enabled_ps}
+
     if custom_order:
-        try: order_list = [p.strip().upper() for p in str(custom_order).split(',') if p.strip()]
-        except: order_list = None
-    else: 
+        try:
+            order_list = [p.strip().upper() for p in str(custom_order).split(',') if p.strip()]
+        except Exception:
+            order_list = None
+    else:
         order_list = None
-        
-    all_matches = []
+
     total_rows = len(df_bank)
-    h_d_bank = {str(c).strip().upper(): c for c in df_bank.columns}
-    col_tkno_name = h_d_bank.get('TKNO', None)
-    col_tkco_name = h_d_bank.get('TKCO', None)
-    col_tenkh_name_in_df = h_d_bank.get('TENKH', None)
-    
-    for idx, row in df_bank.iterrows():
-        if progress_callback and idx % 20 == 0: progress_callback(15 + (idx / total_rows) * 65, f"Đối soát dòng {idx+1}...")
+    h_d_bank = {str(column).strip().upper(): column for column in df_bank.columns}
+    col_tkno_name = h_d_bank.get('TKNO')
+    col_tkco_name = h_d_bank.get('TKCO')
+    col_tenkh_name_in_df = h_d_bank.get('TENKH')
+
+    if COL_DIENGIAI not in df_bank.columns:
+        raise ValueError(f"File sao kê thiếu cột bắt buộc: {COL_DIENGIAI}")
+
+    if progress_callback:
+        progress_callback(10, "Đang tiền xử lý dữ liệu hàng loạt...")
+
+    # Giữ nguyên cách combined regex của mã cũ cho DIENGIAI_CLEANED.
+    compiled_stop_pattern = re.compile('|'.join(dynamic_stops))
+
+    def fast_get_core_name(text_norm):
+        t = compiled_stop_pattern.sub(' ', text_norm)
+        t = compiled_stop_pattern.sub(' ', t)
+        return RE_SPACES.sub(' ', t).strip()
+
+    def remove_temporary_owner(text_norm):
+        # Chỉ loại tên chủ tài khoản; không loại BASE_STOP_WORDS ở luồng P1/P3/P4,
+        # vì các thuật toán này vốn dùng DIENGIAI_NORM của hệ thống cũ.
+        if compiled_owner_pattern is None:
+            return text_norm
+        cleaned = compiled_owner_pattern.sub(' ', text_norm)
+        cleaned = compiled_owner_pattern.sub(' ', cleaned)
+        return RE_SPACES.sub(' ', cleaned).strip()
+
+    def fast_text_ext(text):
+        t = unidecode.unidecode(str(text)).lower()
+        t = RE_EXT_INVALID.sub(' ', t)
+        return RE_SPACES.sub(' ', t).strip()
+
+    # Dùng list comprehension thay Series.apply để giảm overhead Python/Pandas.
+    diengiai_goc_values = df_bank[COL_DIENGIAI].astype(str).tolist()
+    diengiai_norm_values = [normalize_basic(value) for value in diengiai_goc_values]
+    diengiai_owner_filtered_values = [remove_temporary_owner(value) for value in diengiai_norm_values]
+    diengiai_cleaned_values = [fast_get_core_name(value) for value in diengiai_norm_values]
+    diengiai_nospace_values = [value.replace(' ', '') for value in diengiai_owner_filtered_values]
+    diengiai_ext_values = [fast_text_ext(value) for value in diengiai_goc_values]
+
+    columns = list(df_bank.columns)
+    exact_column_positions = {column: index for index, column in enumerate(columns)}
+    tkno_pos = exact_column_positions.get(col_tkno_name) if col_tkno_name is not None else None
+    tkco_pos = exact_column_positions.get(col_tkco_name) if col_tkco_name is not None else None
+    tenkh_pos = exact_column_positions.get(col_tenkh_name_in_df) if col_tenkh_name_in_df is not None else None
+    ttvnd_pos = exact_column_positions.get('TTVND')
+    ttvnd_tt_pos = exact_column_positions.get('TTVND_TT')
+
+    all_matches = []
+    p7_cache = {}
+    p8_cache = {}
+    progress_step = max(20, total_rows // 500 if total_rows else 20)
+
+    for idx, values in enumerate(df_bank.itertuples(index=False, name=None)):
+        if progress_callback and idx % progress_step == 0:
+            progress_callback(15 + (idx / max(total_rows, 1)) * 65, f"Đối soát dòng {idx + 1}/{total_rows}...")
+
         thu_tu_dong = idx + 2
-        diengiai_goc = str(row.get(COL_DIENGIAI, ""))
-        
-        if pd.isna(diengiai_goc) or diengiai_goc.strip() == "" or diengiai_goc.lower().strip() == "nan":
+        diengiai_goc = diengiai_goc_values[idx]
+
+        if not diengiai_goc or diengiai_goc.strip() == "" or diengiai_goc.lower().strip() == "nan":
             all_matches.append({"THỨ TỰ DÒNG GỐC": thu_tu_dong, "DIỄN GIẢI GỐC": "", "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", "CÁCH MATCH": "", "SCORE_NUM": 0})
             continue
-            
-        diengiai_norm = normalize_basic(diengiai_goc)
-        diengiai_cleaned = get_core_name(diengiai_goc, dynamic_stops)
-        diengiai_nospace = diengiai_norm.replace(" ", "")
-        amt_val = parse_amt_to_float(row.get('TTVND', 0))
-        if amt_val == 0: amt_val = parse_amt_to_float(row.get('TTVND_TT', 0))
-        
-        tkco_val = str(row.get(col_tkco_name, '')).strip() if col_tkco_name else ""
-        tkno_val = str(row.get(col_tkno_name, '')).strip() if col_tkno_name else ""
+
+        diengiai_norm = diengiai_owner_filtered_values[idx]
+        diengiai_cleaned = diengiai_cleaned_values[idx]
+        diengiai_nospace = diengiai_nospace_values[idx]
+        text_ext_precalculated = diengiai_ext_values[idx]
+
+        amt_val = parse_amt_to_float(values[ttvnd_pos]) if ttvnd_pos is not None else 0.0
+        if amt_val == 0:
+            amt_val = parse_amt_to_float(values[ttvnd_tt_pos]) if ttvnd_tt_pos is not None else 0.0
+
+        tkco_val = str(values[tkco_pos]).strip() if tkco_pos is not None else ""
+        tkno_val = str(values[tkno_pos]).strip() if tkno_pos is not None else ""
         is_mua_vao = tkco_val.startswith('112')
         is_ban_ra = tkno_val.startswith('112')
-        
+
         if is_mua_vao and list_muavao:
-            current_target_list = list_muavao
-            current_hd_index = hd_index_muavao
+            target_kind = 'mua'
         elif is_ban_ra and list_banra:
-            current_target_list = list_banra
-            current_hd_index = hd_index_banra
+            target_kind = 'ban'
         else:
-            current_target_list = list_banra + list_muavao
-            current_hd_index = {**hd_index_banra, **hd_index_muavao}
-            
+            target_kind = 'all'
+
+        current_target_list = target_lists[target_kind]
+        current_hd_index = target_hd_indexes[target_kind]
+        current_name_index = target_name_indexes[target_kind]
         matches_for_row = []
-        
+
+        # P2 dùng cùng một regex cho toàn bộ master của một dòng; chỉ biên dịch một lần.
+        p2_regex = None
+        if len(diengiai_cleaned) >= 4:
+            p2_regex = re.compile(r'\b' + r'\s+'.join(map(re.escape, diengiai_cleaned.split())) + r'\b')
+
         def try_p1():
-            if "P1" not in enabled_ps: return
-            for master_item in master_list:
+            if "P1" not in enabled_ps:
+                return
+
+            # Aho chỉ tạo tập ứng viên. Regex gốc xác nhận ứng viên để giữ chính xác
+            # word-boundary và quy tắc \s* của P1, kể cả chuỗi số có khoảng trắng.
+            def p1_exact_check(start_index, end_index, candidate):
+                master_item = master_list[candidate[1]]
+                p1_regex = master_item.get('p1_regex')
+                return p1_regex is not None and p1_regex.search(diengiai_norm) is not None
+
+            candidate = p1_matcher.find_best(diengiai_nospace, p1_exact_check)
+            if candidate is not None:
+                master_item = master_list[candidate[1]]
                 core = master_item['norm_core']
-                if len(core) < 3: continue
-                p1_re = master_item.get('p1_regex')
-                if p1_re and p1_re.search(diengiai_norm):
-                    matches_for_row.append((1, len(core), master_item, core.upper()))
-                    return
+                matches_for_row.append((1, len(core), master_item, core.upper()))
+
         def try_p2():
-            if "P2" not in enabled_ps: return
-            for master_item in master_list:
+            if "P2" not in enabled_ps or len(diengiai_cleaned) < 4:
+                return
+            master_index = p2_phrase_index.get(diengiai_cleaned)
+            if master_index is not None:
+                master_item = master_list[master_index]
                 core = master_item['norm_core']
-                if len(diengiai_cleaned) >= 4 and re.search(r'\b' + r'\s+'.join(map(re.escape, diengiai_cleaned.split())) + r'\b', core):
-                    matches_for_row.append((2, -len(core), master_item, diengiai_cleaned.upper()))
-                    return
+                matches_for_row.append((2, -len(core), master_item, diengiai_cleaned.upper()))
+
         def try_p3():
-            if "P3" not in enabled_ps: return
-            for master_item in master_list:
-                core = master_item['norm_core']
-                core_words = core.split()
-                if len(core_words) >= 4:
-                    acronym = "".join(w[0] for w in core_words)
-                    if len(acronym) >= 4 and re.search(r'\b(?:' + '|'.join(ACTION_VERBS) + r')\b.*?\b' + re.escape(acronym) + r'\b', diengiai_norm):
-                        matches_for_row.append((3, len(acronym), master_item, acronym.upper()))
-                        return
+            if "P3" not in enabled_ps:
+                return
+            action_match = ACTION_VERBS_REGEX.search(diengiai_norm)
+            if action_match is None:
+                return
+            best_master_index = None
+            for token in RE_WORD_TOKEN.findall(diengiai_norm[action_match.end():]):
+                master_index = p3_acronym_index.get(token)
+                if master_index is not None and (best_master_index is None or master_index < best_master_index):
+                    best_master_index = master_index
+            if best_master_index is not None:
+                master_item = master_list[best_master_index]
+                acronym = master_item['acronym']
+                matches_for_row.append((3, len(acronym), master_item, acronym.upper()))
+
         def try_p4():
-            if "P4" not in enabled_ps: return
-            for master_item in master_list:
-                core = master_item['norm_core']
-                core_words = core.split()
-                p4_match = False
-                for i in range(len(core_words)):
-                    for j in range(i+1, len(core_words)+1):
-                        chunk = "".join(core_words[i:j])
-                        if ((j - i >= 2 and len(chunk) >= 5) or len(chunk) >= 8) and chunk in diengiai_nospace:
-                            matches_for_row.append((4, len(chunk), master_item, chunk.upper()))
-                            p4_match = True
-                            break
-                    if p4_match: break
-                if p4_match: return
+            if "P4" not in enabled_ps:
+                return
+            candidate = p4_matcher.find_best(diengiai_nospace)
+            if candidate is not None:
+                master_index, chunk = candidate[1]
+                master_item = master_list[master_index]
+                matches_for_row.append((4, len(chunk), master_item, chunk.upper()))
+
         def try_p5():
-            if "P5" not in enabled_ps: return
-            if len(diengiai_cleaned) >= 5:
-                best_sim = 0.0
-                best_master = None
-                bg1 = get_bigrams(diengiai_cleaned)
-                set1 = set(bg1)
-                len_set1 = len(set1)
-                if len_set1 > 0:
-                    for master_item in master_list:
-                        set2 = master_item['bigram_set']
-                        inter_len = len(set1.intersection(set2))
-                        if inter_len > 0:
-                            sim = 2.0 * inter_len / (len_set1 + len(set2))
-                            if sim > best_sim:
-                                best_sim = sim
-                                best_master = master_item
-                if best_sim >= 0.85 and best_master is not None:
-                    matches_for_row.append((5, int(best_sim*100), best_master, f"TÊN AI: {best_master['norm_core'].upper()}"))
+            if "P5" not in enabled_ps or len(diengiai_cleaned) < 5:
+                return
+            set1 = set(get_bigrams(diengiai_cleaned))
+            len_set1 = len(set1)
+            if len_set1 == 0:
+                return
+
+            # Đếm giao bigram bằng posting list. Công thức và thứ tự tie vẫn nguyên.
+            intersection_counts = defaultdict(int)
+            for bigram in set1:
+                for master_index in bigram_master_index.get(bigram, ()):
+                    intersection_counts[master_index] += 1
+
+            best_sim = 0.0
+            best_master = None
+            for master_index in sorted(intersection_counts):
+                master_item = master_list[master_index]
+                inter_len = intersection_counts[master_index]
+                set2 = master_item['bigram_set']
+                sim = 2.0 * inter_len / (len_set1 + len(set2))
+                if sim > best_sim:
+                    best_sim = sim
+                    best_master = master_item
+
+            if best_sim >= 0.85 and best_master is not None:
+                matches_for_row.append((5, int(best_sim * 100), best_master, f"TÊN AI: {best_master['norm_core'].upper()}"))
 
         def get_text_ext():
-            t = unidecode.unidecode(str(diengiai_goc)).lower()
-            t = re.sub(r'[^a-z0-9\s/\-\+\,]', ' ', t)
-            return re.sub(r'\s+', ' ', t).strip()
+            return text_ext_precalculated
 
         def try_p6():
-            if "P6" not in enabled_ps or not current_target_list or amt_val < 5000000: return
+            if "P6" not in enabled_ps or not current_target_list or amt_val < 5000000:
+                return
             raw_hd_groups = hd_pattern_comp.findall(get_text_ext())
             for hd_group in raw_hd_groups:
                 nums = re.findall(r'\d+', hd_group)
-                if not nums: continue
+                if not nums:
+                    continue
                 candidate_sets = []
                 best_item_map = {}
                 for num in set(nums):
                     num_clean = num.lstrip('0') or '0'
-                    if num_clean == '0': continue
+                    if num_clean == '0':
+                        continue
                     cands = current_hd_index.get(num_clean, [])
                     if cands:
                         mas_set = set()
@@ -342,12 +688,15 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                             ma = item.get(COL_MA)
                             if ma:
                                 mas_set.add(ma)
-                                if ma not in best_item_map: best_item_map[ma] = item
+                                if ma not in best_item_map:
+                                    best_item_map[ma] = item
                             elif item.get(COL_TEN_CTY):
                                 ten = item.get(COL_TEN_CTY)
                                 mas_set.add(ten)
-                                if ten not in best_item_map: best_item_map[ten] = item
-                        if mas_set: candidate_sets.append(mas_set)
+                                if ten not in best_item_map:
+                                    best_item_map[ten] = item
+                        if mas_set:
+                            candidate_sets.append(mas_set)
                 if candidate_sets:
                     try:
                         common = set.intersection(*candidate_sets)
@@ -355,84 +704,121 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
                             matched_key = list(common)[0]
                             matches_for_row.append((6, len(nums), best_item_map[matched_key], f"SỐ HĐ: {', '.join(nums)}"))
                             return
-                    except: pass
+                    except Exception:
+                        pass
+
+        def find_p7_item(contract):
+            cache_key = (target_kind, contract)
+            if cache_key in p7_cache:
+                return p7_cache[cache_key]
+
+            c_clean = RE_MATHANG_CLEAN.sub('', contract.upper())
+            parts = re.split(r'[/_.-]', contract.upper())
+            valid_parts = [part for part in parts if len(part) >= 5]
+            matched_item = None
+            for item in current_target_list:
+                mathang_upper = item.get('mathang_upper', '')
+                mathang_clean = item.get('mathang_clean', '')
+                matched = False
+                if len(c_clean) >= 5 and c_clean in mathang_clean:
+                    matched = True
+                elif any(valid_part in mathang_upper for valid_part in valid_parts):
+                    matched = True
+                if matched:
+                    matched_item = item
+                    break
+
+            p7_cache[cache_key] = matched_item
+            return matched_item
 
         def try_p7():
-            if "P7" not in enabled_ps or not current_target_list or amt_val < 5000000: return
+            if "P7" not in enabled_ps or not current_target_list or amt_val < 5000000:
+                return
             text_ext = get_text_ext()
             contracts_found = []
-            explicit_contracts = re.findall(r'\bhop dong\s*(?:so\s*)?([a-z0-9/\-]+)\b', text_ext)
-            contracts_found.extend([c for c in explicit_contracts if len(c) >= 4])
-            explicit_contracts_spaced = re.findall(r'\bhop dong\s*(?:so\s*)?\d+\s+([a-z0-9/\-]+)\b', text_ext)
-            contracts_found.extend([c for c in explicit_contracts_spaced if '/' in c or '-' in c])
-            hd_matches = re.findall(r'\bhd\s*(?:so\s*)?([a-z0-9/\-]+)\b', text_ext)
-            for val in hd_matches:
-                if ('/' in val or '-' in val) and len(val) >= 4: contracts_found.append(val)
+            explicit_contracts = p7_hopdong_pattern.findall(text_ext)
+            contracts_found.extend([contract for contract in explicit_contracts if len(contract) >= 4])
+            explicit_contracts_spaced = p7_hopdong_spaced_pattern.findall(text_ext)
+            contracts_found.extend([contract for contract in explicit_contracts_spaced if '/' in contract or '-' in contract])
+            hd_matches = p7_hd_pattern.findall(text_ext)
+            for value in hd_matches:
+                if ('/' in value or '-' in value) and len(value) >= 4:
+                    contracts_found.append(value)
+
+            # Giữ nguyên set() và thứ tự duyệt như mã gốc.
             for contract in set(contracts_found):
-                c_clean = re.sub(r'[^A-Z0-9]', '', contract.upper())
-                parts = re.split(r'[/_.-]', contract.upper())
-                valid_parts = [p for p in parts if len(p) >= 5]
-                for item in current_target_list:
-                    mathang_upper = str(item.get('MATHANG', '')).upper()
-                    mathang_clean = re.sub(r'[^A-Z0-9]', '', mathang_upper)
-                    matched = False
-                    if len(c_clean) >= 5 and c_clean in mathang_clean: matched = True
-                    elif any(vp in mathang_upper for vp in valid_parts): matched = True
-                    if matched:
-                        matches_for_row.append((7, len(contract), item, f"HỢP ĐỒNG: {contract}"))
-                        return
-                        
-        def try_p8():
-            if "P8" not in enabled_ps or not current_target_list or amt_val < 5000000: return
+                matched_item = find_p7_item(contract)
+                if matched_item is not None:
+                    matches_for_row.append((7, len(contract), matched_item, f"HỢP ĐỒNG: {contract}"))
+                    return
+
+        def find_p8_item():
+            cache_key = (target_kind, amt_val)
+            if cache_key in p8_cache:
+                return p8_cache[cache_key]
+
             matched_companies = []
             best_item = None
             for item in current_target_list:
-                if abs(parse_amt_to_float(item.get('TTVND', 0)) - amt_val) < 1.0 or abs(parse_amt_to_float(item.get('TTVND_TT', 0)) - amt_val) < 1.0:
+                ttvnd = item.get('TTVND', 0.0)
+                ttvnd_tt = item.get('TTVND_TT', 0.0)
+                if abs(ttvnd - amt_val) < 1.0 or abs(ttvnd_tt - amt_val) < 1.0:
                     key = item.get(COL_MA) if item.get(COL_MA) else item.get(COL_TEN_CTY)
                     matched_companies.append(key)
                     best_item = item
-            if len(set(matched_companies)) == 1:
+
+            result = best_item if len(set(matched_companies)) == 1 else None
+            p8_cache[cache_key] = result
+            return result
+
+        def try_p8():
+            if "P8" not in enabled_ps or not current_target_list or amt_val < 5000000:
+                return
+            best_item = find_p8_item()
+            if best_item is not None:
                 matches_for_row.append((8, 0, best_item, f"SỐ TIỀN: {amt_val:,.0f}"))
-        
+
         def try_p9():
-                    if "P9" not in enabled_ps: return
-                    tenkh_goc = str(row.get(col_tenkh_name_in_df, '')) if col_tenkh_name_in_df else ""
-                    if not tenkh_goc or str(tenkh_goc).strip().lower() in ["", "nan"]: return
-                    tenkh_goc_norm = unidecode.unidecode(tenkh_goc).lower().strip()
-                    
-                    # BƯỚC 1: Ưu tiên tìm trong file Mua Vào / Bán Ra trước
-                    if current_target_list:
-                        for item in current_target_list:
-                            item_tenkh = str(item.get(COL_TEN_CTY, '')).strip()
-                            item_tenkh_norm = unidecode.unidecode(item_tenkh).lower().strip()
-                            if tenkh_goc_norm == item_tenkh_norm and tenkh_goc_norm != "":
-                                matches_for_row.append((9, 100, item, f"P9 - TRÙNG TÊN KH GỐC (MUA/BÁN)"))
-                                return # Tìm thấy thì dừng luôn
-                    
-                    # BƯỚC 2: Nếu không tìm thấy ở file Mua/Bán, tiếp tục tìm trong file Master
-                    if master_list:
-                        for master_item in master_list:
-                            master_tenkh = str(master_item.get(COL_TEN_CTY, '')).strip()
-                            master_tenkh_norm = unidecode.unidecode(master_tenkh).lower().strip()
-                            if tenkh_goc_norm == master_tenkh_norm and tenkh_goc_norm != "":
-                                matches_for_row.append((9, 100, master_item, f"P9 - TRÙNG TÊN KH GỐC (MASTER)"))
-                                return
+            if "P9" not in enabled_ps:
+                return
+            tenkh_goc = str(values[tenkh_pos]) if tenkh_pos is not None else ""
+            if not tenkh_goc or tenkh_goc.strip().lower() in ["", "nan"]:
+                return
+            tenkh_goc_norm = unidecode.unidecode(tenkh_goc).lower().strip()
+
+            target_item = current_name_index.get(tenkh_goc_norm)
+            if target_item is not None and tenkh_goc_norm != "":
+                matches_for_row.append((9, 100, target_item, "P9 - TRÙNG TÊN KH GỐC (MUA/BÁN)"))
+                return
+
+            master_item = master_name_index.get(tenkh_goc_norm)
+            if master_item is not None and tenkh_goc_norm != "":
+                matches_for_row.append((9, 100, master_item, "P9 - TRÙNG TÊN KH GỐC (MASTER)"))
 
         def row_chay_thuat_toan(p):
             nonlocal matches_for_row
             matches_for_row = []
-            if p == "P1": try_p1()
-            elif p == "P2": try_p2()
-            elif p == "P3": try_p3()
-            elif p == "P4": try_p4()
-            elif p == "P5": try_p5()
-            elif p == "P6": try_p6()
-            elif p == "P7": try_p7()
-            elif p == "P8": try_p8()
-            elif p == "P9": try_p9()
-            
+            if p == "P1":
+                try_p1()
+            elif p == "P2":
+                try_p2()
+            elif p == "P3":
+                try_p3()
+            elif p == "P4":
+                try_p4()
+            elif p == "P5":
+                try_p5()
+            elif p == "P6":
+                try_p6()
+            elif p == "P7":
+                try_p7()
+            elif p == "P8":
+                try_p8()
+            elif p == "P9":
+                try_p9()
+
             if matches_for_row:
-                matches_for_row.sort(key=lambda x: (x[0], -x[1]))
+                matches_for_row.sort(key=lambda match: (match[0], -match[1]))
                 return matches_for_row[0]
             return None
 
@@ -446,39 +832,47 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
 
         if master_chot:
             all_matches.append({
-                "THỨ TỰ DÒNG GỐC": thu_tu_dong, 
-                "DIỄN GIẢI GỐC": diengiai_goc, 
-                "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": bc["ten_quet"], 
-                "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": bc["hd_quet"], 
-                "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": bc["hopdong_quet"], 
-                "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": bc["sotien_quet"], 
-                "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": master_chot.get(COL_TEN_CTY, ""), 
-                "MÃ ĐỐI TƯỢNG PHÁP NHÂN": master_chot.get(COL_MA, ""), 
-                "CÁCH MATCH": f"{ghi_chu_chot}", 
-                "SCORE_NUM": 100
+                "THỨ TỰ DÒNG GỐC": thu_tu_dong,
+                "DIỄN GIẢI GỐC": diengiai_goc,
+                "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": bc["ten_quet"],
+                "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": bc["hd_quet"],
+                "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": bc["hopdong_quet"],
+                "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": bc["sotien_quet"],
+                "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": master_chot.get(COL_TEN_CTY, ""),
+                "MÃ ĐỐI TƯỢNG PHÁP NHÂN": master_chot.get(COL_MA, ""),
+                "CÁCH MATCH": f"{ghi_chu_chot}",
+                "SCORE_NUM": 100,
             })
         else:
             all_matches.append({
-                "THỨ TỰ DÒNG GỐC": thu_tu_dong, 
-                "DIỄN GIẢI GỐC": diengiai_goc, 
-                "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", 
-                "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", 
-                "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", 
-                "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "", 
-                "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "", 
-                "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "", 
-                "CÁCH MATCH": "No Match", 
-                "SCORE_NUM": 0
+                "THỨ TỰ DÒNG GỐC": thu_tu_dong,
+                "DIỄN GIẢI GỐC": diengiai_goc,
+                "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
+                "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
+                "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
+                "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI": "",
+                "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN": "",
+                "MÃ ĐỐI TƯỢNG PHÁP NHÂN": "",
+                "CÁCH MATCH": "No Match",
+                "SCORE_NUM": 0,
             })
-            
+
+    # Không giữ closure của dòng cuối cùng và toàn bộ dữ liệu lớn sau khi match xong.
+    global_chay_thuat_toan_func = None
+
+    # Mã gốc sử dụng matches_dict bên dưới nhưng chưa khởi tạo.
+    # Đây là khôi phục biến ánh xạ đã được phần cập nhật sao kê mong đợi.
+    matches_dict = {match["THỨ TỰ DÒNG GỐC"]: match for match in all_matches}
+
     wb_doichieu = Workbook()
     ws = wb_doichieu.active
     ws.title = "Ket Qua Match"
     headers = ["THỨ TỰ DÒNG GỐC", "DIỄN GIẢI GỐC", "TÊN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "HÓA ĐƠN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "HỢP ĐỒNG QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "SỐ TIỀN QUÉT ĐƯỢC TRẠNG DIỄN GIẢI", "TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN", "MÃ ĐỐI TƯỢNG PHÁP NHÂN", "CÁCH MATCH"]
     ws.append(headers)
-    for m in all_matches: ws.append([m.get(h, "") for h in headers])
+    for match in all_matches:
+        ws.append([match.get(header, "") for header in headers])
     format_excel_sheet(ws, is_doichieu=True)
-    
+
     ws_legend = wb_doichieu.create_sheet("Giai Thich P1-P9")
     legend_data = [
         ["CÁCH MATCH", "Ý NGHĨA", "MÔ TẢ CHI TIẾT"],
@@ -493,55 +887,86 @@ def process_bank_data(file_saoke, file_master, path_save_doichieu, path_save_sao
         ["P9", "Khớp Tên KH Gốc", "Dùng TENKH sẵn có trên file sao kê gốc để đối chiếu chéo (không dấu) với file Mua/Bán"],
     ]
     thin = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    for r_idx, row_data in enumerate(legend_data, 1):
-        for c_idx, value in enumerate(row_data, 1):
-            cell = ws_legend.cell(row=r_idx, column=c_idx, value=value)
+    for row_index, row_data in enumerate(legend_data, 1):
+        for column_index, value in enumerate(row_data, 1):
+            cell = ws_legend.cell(row=row_index, column=column_index, value=value)
             cell.border = thin
             cell.alignment = Alignment(wrap_text=True, vertical="center")
-            if r_idx == 1: cell.font = Font(bold=True)
+            if row_index == 1:
+                cell.font = Font(bold=True)
     ws_legend.column_dimensions['A'].width = 14
     ws_legend.column_dimensions['B'].width = 25
     ws_legend.column_dimensions['C'].width = 80
     wb_doichieu.save(path_save_doichieu)
-    
+    wb_doichieu.close()
+
     wb_saoke = load_workbook(file_saoke)
     ws = wb_saoke.active
-    h_d = {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
+    h_d = {str(cell.value).strip().upper(): cell.column for cell in ws[1] if cell.value}
     col_tkno = h_d.get('TKNO', 5)
     col_tkco = h_d.get('TKCO', 7)
     col_madtpnno = h_d.get('MADTPNNO', 6)
     col_madtpnco = h_d.get('MADTPNCO', 8)
     col_tenkh = h_d.get('TENKH', 11)
     col_ghichu = h_d.get('GHICHU')
-    def is_valid_cell(val): return pd.notna(val) and str(val).strip() != "" and str(val).lower().strip() != "nan"
-    
-    yellow_fill = PatternFill(start_color="FFFFFF00", fill_type="solid")
-    for r in range(2, ws.max_row + 1):
-        matched = [m for m in all_matches if m["THỨ TỰ DÒNG GỐC"] == r and m["SCORE_NUM"] == 100]
-        if matched:
-            m = matched[0]
-            ma_dtpn = str(m.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN", "")).strip()
-            if ma_dtpn.lower() == "nan": ma_dtpn = ""
-            
-            tkco_val = str(ws.cell(row=r, column=col_tkco).value).strip() if is_valid_cell(ws.cell(row=r, column=col_tkco).value) else ""
-            tkno_val = str(ws.cell(row=r, column=col_tkno).value).strip() if is_valid_cell(ws.cell(row=r, column=col_tkno).value) else ""
-            
-            if tkco_val == "1121" or (tkco_val != "" and tkno_val == ""): ws.cell(row=r, column=col_madtpnno).value = ma_dtpn
-            elif tkno_val == "1121" or (tkno_val != "" and tkco_val == ""): ws.cell(row=r, column=col_madtpnco).value = ma_dtpn
-            else: ws.cell(row=r, column=col_madtpnno).value = ma_dtpn
-            
-            ws.cell(row=r, column=col_tenkh).value = m["TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN"]
-            if col_ghichu: ws.cell(row=r, column=col_ghichu).value = m["CÁCH MATCH"]
-            
-            if ma_dtpn == "":
-                for c in range(1, ws.max_column + 1): ws.cell(row=r, column=c).fill = yellow_fill
-        else:
-            for c in range(1, ws.max_column + 1): ws.cell(row=r, column=c).fill = yellow_fill
-            
-    if progress_callback: progress_callback(98, "Đang lưu file...")
-    wb_saoke.save(path_save_saokemoi)
-    if progress_callback: progress_callback(100, "Hoàn tất thành công!")
 
+    def is_valid_cell(value):
+        return pd.notna(value) and str(value).strip() != "" and str(value).lower().strip() != "nan"
+
+    yellow_fill = PatternFill(start_color="FFFFFF00", fill_type="solid")
+    for row_number in range(2, ws.max_row + 1):
+        match = matches_dict.get(row_number)
+        if match is not None:
+            ma_dtpn = str(match.get("MÃ ĐỐI TƯỢNG PHÁP NHÂN", "")).strip()
+            if ma_dtpn.lower() == "nan":
+                ma_dtpn = ""
+
+            tkco_cell_value = ws.cell(row=row_number, column=col_tkco).value
+            tkno_cell_value = ws.cell(row=row_number, column=col_tkno).value
+            tkco_val = str(tkco_cell_value).strip() if is_valid_cell(tkco_cell_value) else ""
+            tkno_val = str(tkno_cell_value).strip() if is_valid_cell(tkno_cell_value) else ""
+
+            matched_name = str(match.get("TÊN MATCH ĐƯỢC TRẠNG FILE ĐỐI TƯỢNG PHÁP NHÂN", "")).strip()
+            if matched_name.lower() == "nan":
+                matched_name = ""
+            match_method = str(match.get("CÁCH MATCH", "")).strip()
+            if match_method.lower() == "nan":
+                match_method = ""
+
+            # QUAN TRỌNG: Nếu dòng không match được thì giữ nguyên dữ liệu sao kê gốc.
+            # Bản cũ vẫn đưa dòng No Match vào matches_dict, rồi ghi chuỗi rỗng vào
+            # MADTPN/TENKH/GHICHU, làm mất TENKH đã có sẵn trước khi xử lý.
+            # Từ đây: No Match chỉ được tô vàng, tuyệt đối không xóa/ghi đè ô cũ.
+            is_successful_match = bool(ma_dtpn or matched_name) and match_method != "No Match"
+
+            if is_successful_match:
+                # Không bao giờ ghi đè bằng chuỗi rỗng. Nếu một phần kết quả thiếu,
+                # giữ nguyên giá trị cũ của ô đó để tránh mất dữ liệu thủ công/file gốc.
+                if ma_dtpn:
+                    if tkco_val == "1121" or (tkco_val != "" and tkno_val == ""):
+                        ws.cell(row=row_number, column=col_madtpnno).value = ma_dtpn
+                    elif tkno_val == "1121" or (tkno_val != "" and tkco_val == ""):
+                        ws.cell(row=row_number, column=col_madtpnco).value = ma_dtpn
+                    else:
+                        ws.cell(row=row_number, column=col_madtpnno).value = ma_dtpn
+
+                if matched_name:
+                    ws.cell(row=row_number, column=col_tenkh).value = matched_name
+                if col_ghichu and match_method:
+                    ws.cell(row=row_number, column=col_ghichu).value = match_method
+            else:
+                for column_number in range(1, ws.max_column + 1):
+                    ws.cell(row=row_number, column=column_number).fill = yellow_fill
+        else:
+            for column_number in range(1, ws.max_column + 1):
+                ws.cell(row=row_number, column=column_number).fill = yellow_fill
+
+    if progress_callback:
+        progress_callback(98, "Đang lưu file...")
+    wb_saoke.save(path_save_saokemoi)
+    wb_saoke.close()
+    if progress_callback:
+        progress_callback(100, "Hoàn tất thành công!")
 
 class AppGomNghiepVu:
     def __init__(self, root):
@@ -610,9 +1035,10 @@ class AppGomNghiepVu:
         
         f_stop = tk.Frame(self.tab1)
         f_stop.pack(fill="x", padx=20, pady=5)
-        tk.Label(f_stop, text="Nhập Tên Chủ TK cần loại trừ:", font=("Arial", 10, "bold")).pack(anchor="w")
+        tk.Label(f_stop, text="Tên chủ tài khoản cần loại trừ tạm thời (không lưu):", font=("Arial", 10, "bold")).pack(anchor="w")
         self.entry_stop_words = tk.Entry(f_stop, width=70, font=("Arial", 11))
         self.entry_stop_words.pack(anchor="w", ipady=3)
+        tk.Label(f_stop, text="Nhập nhiều tên bằng dấu phẩy, chấm phẩy hoặc |. Tên chỉ có hiệu lực trong lần chạy này.", font=("Arial", 8), fg="gray").pack(anchor="w")
         
         self.btn_run_t1 = tk.Button(self.tab1, text="BẤT ĐẦU ĐỐI SOÁT EXCEL", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), command=self.t1_chay, height=2)
         self.btn_run_t1.pack(fill="x", padx=25, pady=10)
@@ -696,6 +1122,7 @@ class AppGomNghiepVu:
         if p_pdf:
             self.btn_run_t3.config(state="disabled", text="ĐANG GHÉP VÀ LƯU PDF...")
             self.root.update()
+            imgs = []
             try:
                 imgs = [Image.open(p).convert('RGB') for p in self.selected_images]
                 if imgs:
@@ -706,6 +1133,8 @@ class AppGomNghiepVu:
             except Exception as e:
                 messagebox.showerror("Lỗi", str(e))
             finally:
+                for img in imgs:
+                    img.close()
                 self.btn_run_t3.config(state="normal", text="XUẤT RA PDF CHỨNG TỪ")
 
     def t1_update_progress(self, percent, text):
